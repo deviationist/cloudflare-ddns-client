@@ -1,0 +1,21 @@
+[
+    {
+        "apiKey": "your-api-key",
+        "zones": [
+            {
+                "zoneId": "your-zone-id",
+                "dnsRecords": [
+                    "domain.com",
+                    "domain.eu"
+                ]
+            },
+            {
+                "zoneId": "your-zone-id2",
+                "dnsRecords": [
+                    "foo.com",
+                    "bar.com"
+                ]
+            }
+        ]
+    }
+]

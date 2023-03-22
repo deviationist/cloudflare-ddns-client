@@ -1,0 +1,13 @@
+{
+  "name": "cloudflare-ddns-updater",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A Node-based Cloudflare DDNS app.",
+  "main": "./src/index.js",
+  "scripts": {
+    "start": "node ./src/index.js",
+    "dev": "nodemon --watch src ./src/index.js"
+  },
+  "author": "Robert S.",
+  "license": "ISC"
+}

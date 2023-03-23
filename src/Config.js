@@ -35,4 +35,14 @@ export default class Config {
     static exists() {
         return existsSync(Config.filePath);
     }
+
+    static resolveApiKey(item, zone) {
+        if (zone?.apiKey) {
+            return zone.apiKey;
+        }
+        if (item?.apiKey) {
+            return item.apiKey;
+        }
+        return false;
+    }
 }

@@ -1,13 +1,19 @@
 export default class Cloudflare {
     static baseUrl = 'https://api.cloudflare.com/client/v4';
+
+    static buildHeaders(apiKey, additional) {
+        if (!additional) additional = {};
+        return {
+            ...additional,
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+        };
+    }
     
     static async getDnsRecord(apiKey, zoneId, dnsRecord) {
         try {
             const response = await fetch(`${Cloudflare.baseUrl}/zones/${zoneId}/dns_records?type=A&name=${dnsRecord}`, {
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json'
-                }
+                headers: Cloudflare.buildHeaders(apiKey)
             });
             const jsonResponse = await response.json();
             return jsonResponse?.result?.[0];
@@ -20,10 +26,7 @@ export default class Cloudflare {
         try {
             const response = await fetch(`${Cloudflare.baseUrl}/zones/${zoneId}/dns_records/${dnsRecordId}`, {
                 method: 'PUT',
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json'
-                },
+                headers: Cloudflare.buildHeaders(apiKey),
                 body: JSON.stringify(data)
             });
             return response.status === 200;

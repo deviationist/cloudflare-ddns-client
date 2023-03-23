@@ -17,5 +17,25 @@
                 ]
             }
         ]
+    },
+    {
+        "zones": [
+            {
+                "apiKey": "your-api-key-for-zone",
+                "zoneId": "your-zone-id",
+                "dnsRecords": [
+                    "domain.com",
+                    "domain.eu"
+                ]
+            },
+            {
+                "apiKey": "your-api-key-for-zone",
+                "zoneId": "your-zone-id2",
+                "dnsRecords": [
+                    "foo.com",
+                    "bar.com"
+                ]
+            }
+        ]
     }
 ]

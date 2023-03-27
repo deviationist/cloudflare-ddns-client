@@ -30,13 +30,13 @@ items.map(item => {
             }
 
             const dnsRecordFromCf = await Cloudflare.getDnsRecord(apiKey, zone.zoneId, dnsRecord);
-            if (!dnsRecordFromCf) {
+            if (!dnsRecordFromCf || !dnsRecordFromCf?.id) {
                 console.error(`Could not get DNS record ID for "${dnsRecord}". Aborting.`);
                 return;
             }
-            console.log(`DNS record Id for "${dnsRecord}" is "${dnsRecordFromCf?.id}".`);
+            console.log(`DNS record Id for "${dnsRecord}" is "${dnsRecordFromCf.id}".`);
 
-            const success = await Cloudflare.updateDnsRecord(apiKey, zone.zoneId, dnsRecordFromCf?.id, {
+            const success = await Cloudflare.updateDnsRecord(apiKey, zone.zoneId, dnsRecordFromCf.id, {
                 type: 'A',
                 name: dnsRecord,
                 content: ipAddress,

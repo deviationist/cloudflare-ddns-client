@@ -1,5 +1,5 @@
 # Cloudflare DDNS client
-This Node-application will check your current public IP address and update the A-record of the specified domain in Cloudflare DNS.
+This Node-application will check your current public IP address and update the A-record of the specified domain(s) in Cloudflare DNS. There is also support for domains in multiple zones.
 
 ## Setup
 First make sure you have node installed.

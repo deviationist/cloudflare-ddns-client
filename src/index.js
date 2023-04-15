@@ -2,39 +2,44 @@ import Config from './Config.js';
 import Ip from './Ip.js';
 import Cloudflare from './Cloudflare.js';
 
-const items = Config.get();
+const forceUpdate = process.argv.includes('--forceUpdate');
+const verbose = process.argv.includes('--verbose');
 
 const ipAddress = await Ip.get();
 if (!ipAddress) {
-    console.error('Coult not obtain IP address.');
+    if (verbose) console.error('Coult not obtain IP address.');
     process.exit(1);
 }
 
-const forceUpdate = process.argv.includes('--forceUpdate');
+if (verbose) console.log(`Current IP address: ${ipAddress}`);
 
-console.log(`Current IP address: ${ipAddress}`);
+const items = Config.get();
+if (!items) {
+    if (verbose) console.error('Configuration is missing.');
+    process.exit(1);
+}
 
 items.map(item => {
     item.zones.map(zone => {
         zone.dnsRecords.map(async (dnsRecord) => {
             
             if (!forceUpdate && ipAddress == await Ip.resolve(dnsRecord)) {
-                console.log(`Domain "${dnsRecord}" is currently set to "${ipAddress}", no changes needed.`);
+                if (verbose) console.log(`Domain "${dnsRecord}" is currently set to "${ipAddress}", no changes needed.`);
                 return;
             }
 
             const apiKey = Config.resolveApiKey(item, zone);
             if (!apiKey) {
-                console.error('Missing API key!');
+                if (verbose) console.error('Missing API key!');
                 return;
             }
 
             const dnsRecordFromCf = await Cloudflare.getDnsRecord(apiKey, zone.zoneId, dnsRecord);
             if (!dnsRecordFromCf || !dnsRecordFromCf?.id) {
-                console.error(`Could not get DNS record ID for "${dnsRecord}". Aborting.`);
+                if (verbose) console.error(`Could not get DNS record ID for "${dnsRecord}". Aborting.`);
                 return;
             }
-            console.log(`DNS record Id for "${dnsRecord}" is "${dnsRecordFromCf.id}".`);
+            if (verbose) console.log(`DNS record Id for "${dnsRecord}" is "${dnsRecordFromCf?.id}".`);
 
             const success = await Cloudflare.updateDnsRecord(apiKey, zone.zoneId, dnsRecordFromCf.id, {
                 type: 'A',
@@ -45,9 +50,9 @@ items.map(item => {
             });
 
             if (success) {
-                console.log(`Successfully updated IP address to ${ipAddress} for "${dnsRecord}".`);
+                if (verbose) console.log(`Successfully updated IP address to ${ipAddress} for "${dnsRecord}".`);
             } else {
-                console.error(`Error: could not update IP address to ${ipAddress} for "${dnsRecord}".`);
+                if (verbose) console.error(`Error: could not update IP address to ${ipAddress} for "${dnsRecord}".`);
             }
         });
     });

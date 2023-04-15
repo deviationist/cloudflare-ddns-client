@@ -1,8 +1,7 @@
 export default class Cloudflare {
     static baseUrl = 'https://api.cloudflare.com/client/v4';
 
-    static buildHeaders(apiKey, additional) {
-        if (!additional) additional = {};
+    static buildHeaders(apiKey, additional = {}) {
         return {
             ...additional,
             'Authorization': `Bearer ${apiKey}`,

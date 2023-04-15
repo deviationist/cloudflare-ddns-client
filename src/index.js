@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import Config from './Config.js';
 import Ip from './Ip.js';
 import Cloudflare from './Cloudflare.js';

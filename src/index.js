@@ -2,9 +2,13 @@
 import Config from './Config.js';
 import Ip from './Ip.js';
 import Cloudflare from './Cloudflare.js';
+import yargs from 'yargs';
 
-const forceUpdate = process.argv.includes('--forceUpdate');
-const verbose = process.argv.includes('--verbose');
+const argv = yargs(process.argv).argv;
+
+const forceUpdate = argv.forceUpdate;
+const verbose = argv.verbose;
+const configPath = argv.configPath;
 
 const ipAddress = await Ip.get();
 if (!ipAddress) {
@@ -14,6 +18,7 @@ if (!ipAddress) {
 
 if (verbose) console.log(`Current IP address: ${ipAddress}`);
 
+if (configPath) Config.filePath = configPath;
 const items = Config.get();
 if (!items) {
     if (verbose) console.error('Configuration is missing.');

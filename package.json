@@ -9,5 +9,8 @@
     "dev": "nodemon --watch src ./src/index.js"
   },
   "author": "Robert S.",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "yargs": "^17.7.2"
+  }
 }

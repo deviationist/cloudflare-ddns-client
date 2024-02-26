@@ -8,8 +8,10 @@ const argv = yargs(process.argv).argv;
 
 const forceUpdate = argv.forceUpdate;
 const verbose = argv.verbose;
+const dryRun = argv.dryRun;
 const configPath = argv.configPath;
 
+const logMessagePrefix = dryRun ? '[DRY RUN] ' : '';
 const ipAddress = await Ip.get();
 if (!ipAddress) {
     if (verbose) console.error('Coult not obtain IP address.');
@@ -30,13 +32,13 @@ items.map(item => {
         zone.dnsRecords.map(async (dnsRecord) => {
             
             if (!forceUpdate && ipAddress == await Ip.resolve(dnsRecord)) {
-                if (verbose) console.log(`Domain "${dnsRecord}" is currently set to "${ipAddress}", no changes needed.`);
+                if (verbose) console.log(`${logMessagePrefix}Domain "${dnsRecord}" is currently set to "${ipAddress}", no changes needed.`);
                 return;
             }
 
             const apiKey = Config.resolveApiKey(item, zone);
             if (!apiKey) {
-                if (verbose) console.error('Missing API key!');
+                if (verbose) console.error(`${logMessagePrefix}Missing API key!`);
                 return;
             }
 
@@ -45,20 +47,25 @@ items.map(item => {
                 if (verbose) console.error(`Could not get DNS record ID for "${dnsRecord}". Aborting.`);
                 return;
             }
-            if (verbose) console.log(`DNS record Id for "${dnsRecord}" is "${dnsRecordFromCf?.id}".`);
+            if (verbose) console.log(`${logMessagePrefix}DNS record Id for "${dnsRecord}" is "${dnsRecordFromCf?.id}".`);
 
-            const success = await Cloudflare.updateDnsRecord(apiKey, zone.zoneId, dnsRecordFromCf.id, {
-                type: 'A',
-                name: dnsRecord,
-                content: ipAddress,
-                ttl: 1,
-                proxied: false
-            });
+            let success = false;
+            if (dryRun) {
+                success = true;
+            } else {
+                success = await Cloudflare.updateDnsRecord(apiKey, zone.zoneId, dnsRecordFromCf.id, {
+                    type: 'A',
+                    name: dnsRecord,
+                    content: ipAddress,
+                    ttl: 1,
+                    proxied: false
+                });
+            }
 
             if (success) {
-                if (verbose) console.log(`Successfully updated IP address to ${ipAddress} for "${dnsRecord}".`);
+                if (verbose) console.log(`${logMessagePrefix}Successfully updated IP address to ${ipAddress} for "${dnsRecord}".`);
             } else {
-                if (verbose) console.error(`Error: could not update IP address to ${ipAddress} for "${dnsRecord}".`);
+                if (verbose) console.error(`${logMessagePrefix}Error: could not update IP address to ${ipAddress} for "${dnsRecord}".`);
             }
         });
     });

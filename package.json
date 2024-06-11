@@ -6,11 +6,13 @@
   "main": "./src/index.js",
   "scripts": {
     "start": "node ./src/index.js",
-    "dev": "nodemon --watch src ./src/index.js"
+    "dev": "nodemon --watch src ./src/index.js",
+    "mailtest": "node ./src/mailTest.js"
   },
   "author": "Robert S.",
   "license": "ISC",
   "dependencies": {
+    "nodemailer": "^6.9.13",
     "yargs": "^17.7.2"
   }
 }

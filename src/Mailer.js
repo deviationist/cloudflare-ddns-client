@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { serviceName } from './Constants';
+import { serviceName } from './Constants.js';
 
 export default class Mailer {
   client = null;

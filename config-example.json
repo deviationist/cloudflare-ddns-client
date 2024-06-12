@@ -1,5 +1,5 @@
 {
-  "serviceName": "your-ddns-service",
+  "serviceId": "your-ddns-service",
   "errorRecipientMailAddress": "to-address@gmail.com",
   "mailConfig": {
     "fromAddress": "from-address@gmail.com",

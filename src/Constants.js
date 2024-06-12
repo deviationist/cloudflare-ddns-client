@@ -1,0 +1,1 @@
+export const serviceName = 'Cloudflare DDNS Client';

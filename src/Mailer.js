@@ -5,6 +5,10 @@ export default class Mailer {
   fromAddress;
   config;
 
+  static generateSubject(subject, serviceId) {
+    return `${subject} - ${serviceName}${serviceId ? ` (${serviceId})` : ''}`;
+  };
+
   constructor(Config) {
     this.config = Config.get('mailConfig');
     if (!this.config.fromAddress || !this.config.password) return; // Missing config

@@ -29,11 +29,12 @@ export default class ErrorHandler {
     if (this.errors.length === 0) return;
     const toAddress = this.config.get('errorRecipientMailAddress');
     if (!toAddress) return; // Missing config
+    const serviceName = this.config.get('serviceName');
     try {
       await this.mailer.send(
-        toAddress, 
-        `${this.errors.length > 1 ? 'Multiple errors' : 'Error'} - Cloudflare DDNS Client`,
-        `There seems to be an issue with the Cloudflare DDNS Client. See error messages below: \n${this.errors.map(error => `- ${error.message}`).join('\n')}`
+        toAddress,
+        `${this.errors.length > 1 ? 'Multiple errors' : 'Error'} - Cloudflare DDNS Client${serviceName ? ` (${serviceName})` : ''}`,
+        `There seems to be an issue with the Cloudflare DDNS Client${serviceName ? ` (${serviceName})` : ''}. See error messages below: \n${this.errors.map(error => `- ${error.message}`).join('\n')}`
       );
     } catch(error) {
       this.logger('Could not send error mail')

@@ -1,6 +1,7 @@
 import Mailer from './Mailer.js';
 import Config from './Config.js';
 import yargs from 'yargs';
+import { serviceName } from './Constants.js';
 
 const argv = yargs(process.argv).argv;
 const configPath = argv.configPath;

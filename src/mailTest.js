@@ -20,8 +20,8 @@ if (!toAddress) {
 }
 
 try {
-  const subject = 'Email test - Cloudflare DDNS Client';
-  const message = 'This is a test email from Cloudflare DDNS Client.';
+  const subject = Mailer.generateSubject('Email test', Config.get('serviceId'));
+  const message = `This is a test email from ${serviceName}.`;
   console.log('Sending email from', mailer.fromAddress);
   console.log('Sending email to', toAddress);
   console.log('Subject:', subject);

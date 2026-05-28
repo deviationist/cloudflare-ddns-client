@@ -14,9 +14,9 @@ if (!mailer.isConfigured()) {
   process.exit(1);
 }
 
-const toAddress = Config.get('errorRecipientMailAddress');
+const toAddress = Config.get('notificationMailAddress');
 if (!toAddress) {
-  console.log('errorRecipientMailAddress is not configured');
+  console.log('notificationMailAddress is not configured');
   process.exit(1);
 }
 

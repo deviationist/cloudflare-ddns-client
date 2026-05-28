@@ -5,12 +5,10 @@ export default class ErrorHandler {
   errors = [];
   config;
   logger;
-  verbose;
   mailer;
 
-  constructor(Config, verbose = false, logger ) {
+  constructor(Config, logger) {
     this.config = Config;
-    this.verbose = verbose;
     this.logger = logger;
     this.mailer = new Mailer(Config);
   }
@@ -21,7 +19,7 @@ export default class ErrorHandler {
 
   add(error) {
     this.errors.push(error);
-    if (this.verbose) this.logger(error.message, 'error');
+    this.logger(error.message, 'error');
     return this;
   }
 

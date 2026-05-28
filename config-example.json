@@ -1,9 +1,15 @@
 {
   "serviceId": "your-ddns-service",
-  "errorRecipientMailAddress": "to-address@gmail.com",
+  "errorRecipientMailAddress": "to-address@example.com",
   "mailConfig": {
-    "fromAddress": "from-address@gmail.com",
-    "password": ""
+    "fromAddress": "ddns@yourdomain.com",
+    "smtp": {
+      "host": "smtp-relay.brevo.com",
+      "port": 587,
+      "secure": false,
+      "login": "your-brevo-account@example.com",
+      "password": "your-brevo-smtp-api-key"
+    }
   },
   "items": [
     {

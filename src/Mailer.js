@@ -12,13 +12,16 @@ export default class Mailer {
 
   constructor(Config) {
     this.config = Config.get('mailConfig');
-    if (!this.config.fromAddress || !this.config.password) return; // Missing config
+    const smtp = this.config?.smtp;
+    if (!this.config?.fromAddress || !smtp?.login || !smtp?.password) return;
     this.fromAddress = this.config.fromAddress;
     this.client = nodemailer.createTransport({
-      service: 'Gmail',
+      host: smtp.host,
+      port: smtp.port ?? 587,
+      secure: smtp.secure ?? false,
       auth: {
-          user: this.fromAddress,
-          pass: this.config.password
+        user: smtp.login,
+        pass: smtp.password
       }
     });
   }

@@ -32,6 +32,7 @@ export default class Mailer {
 
   async send(toAddress, subject, message) {
     return this.client.sendMail({
+      from: this.fromAddress,
       to: toAddress,
       subject,
       text: message

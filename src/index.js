@@ -57,6 +57,11 @@ await Promise.all(items.flatMap(item =>
 
       const oldIp = dnsRecordFromCf.content;
 
+      if (!forceUpdate && oldIp === ipAddress) {
+        if (verbose) logger(`Domain "${dnsRecord}" Cloudflare record already set to "${ipAddress}", no changes needed.`);
+        return;
+      }
+
       let success = false;
       if (dryRun) {
         success = true;

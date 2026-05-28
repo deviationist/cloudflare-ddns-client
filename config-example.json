@@ -1,5 +1,7 @@
 {
   "serviceId": "your-ddns-service",
+  "logFile": "/var/log/cloudflare-ddns/app.log",
+  "ipHistoryFile": "/var/log/cloudflare-ddns/ip-history.log",
   "notificationMailAddress": "to-address@example.com",
   "mailConfig": {
     "fromAddress": "ddns@yourdomain.com",

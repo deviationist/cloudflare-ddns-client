@@ -28,7 +28,7 @@ export default class ErrorHandler {
   async handle(exitAfter = true) {
     if (!this.mailer.isConfigured()) return; // Missing config
     if (this.errors.length === 0) return;
-    const toAddress = this.config.get('errorRecipientMailAddress');
+    const toAddress = this.config.get('notificationMailAddress');
     if (!toAddress) return; // Missing config
     const serviceId = this.config.get('serviceId');
     try {

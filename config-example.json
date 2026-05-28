@@ -1,6 +1,6 @@
 {
   "serviceId": "your-ddns-service",
-  "errorRecipientMailAddress": "to-address@example.com",
+  "notificationMailAddress": "to-address@example.com",
   "mailConfig": {
     "fromAddress": "ddns@yourdomain.com",
     "smtp": {

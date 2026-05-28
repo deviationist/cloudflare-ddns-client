@@ -86,7 +86,7 @@ await Promise.all(items.flatMap(item =>
 ));
 
 if (updatedRecords.length > 0 && mailer.isConfigured()) {
-  const toAddress = Config.get('errorRecipientMailAddress');
+  const toAddress = Config.get('notificationMailAddress');
   if (toAddress) {
     const serviceId = Config.get('serviceId');
     const oldIp = updatedRecords[0].oldIp;

@@ -4,6 +4,7 @@ import Ip from './Ip.js';
 import Cloudflare from './Cloudflare.js';
 import yargs from 'yargs';
 import ErrorHandler from './ErrorHandler.js';
+import Mailer from './Mailer.js';
 
 const argv = yargs(process.argv).argv;
 
@@ -16,6 +17,7 @@ const logger = (message, method = 'log') => console[method](`${logMessagePrefix}
 if (configPath) Config.filePath = configPath;
 
 const errorHandler = new ErrorHandler(Config, verbose, logger);
+const mailer = new Mailer(Config);
 
 const ipAddress = await Ip.get();
 if (!ipAddress) {
@@ -30,17 +32,19 @@ if (!items) {
   process.exit(1);
 }
 
-items.map(item => {
-  item.zones.map(zone => {
-    zone.dnsRecords.map(async (dnsRecord) => {  
+const updatedRecords = [];
+
+await Promise.all(items.flatMap(item =>
+  item.zones.flatMap(zone =>
+    zone.dnsRecords.map(async (dnsRecord) => {
       if (!forceUpdate && ipAddress == await Ip.resolve(dnsRecord)) {
-        if (verbose) logger(`${logMessagePrefix}Domain "${dnsRecord}" is currently set to "${ipAddress}", no changes needed.`);
+        if (verbose) logger(`Domain "${dnsRecord}" is currently set to "${ipAddress}", no changes needed.`);
         return;
       }
 
       const apiKey = Config.resolveApiKey(item, zone);
       if (!apiKey) {
-        if (verbose) logger(`${logMessagePrefix}Missing API key!`, 'error');
+        if (verbose) logger(`Missing API key!`, 'error');
         return;
       }
 
@@ -49,7 +53,9 @@ items.map(item => {
         if (verbose) console.error(`Could not get DNS record ID for "${dnsRecord}". Aborting.`);
         return;
       }
-      if (verbose) logger(`${logMessagePrefix}DNS record Id for "${dnsRecord}" is "${dnsRecordFromCf?.id}".`);
+      if (verbose) logger(`DNS record Id for "${dnsRecord}" is "${dnsRecordFromCf?.id}".`);
+
+      const oldIp = dnsRecordFromCf.content;
 
       let success = false;
       if (dryRun) {
@@ -66,6 +72,7 @@ items.map(item => {
 
       if (success) {
         if (verbose) logger(`Successfully updated IP address to ${ipAddress} for "${dnsRecord}".`);
+        updatedRecords.push({ dnsRecord, oldIp, newIp: ipAddress });
       } else {
         errorHandler.add({
           message: 'Could not update DNS-record',
@@ -73,11 +80,29 @@ items.map(item => {
           dnsRecord,
           zone: zone.name
         });
-        //if (verbose) logger(`${logMessagePrefix}Error: could not update IP address to ${ipAddress} for "${dnsRecord}".`, 'error');
       }
-    });
-  });
-});
+    })
+  )
+));
+
+if (updatedRecords.length > 0 && mailer.isConfigured()) {
+  const toAddress = Config.get('errorRecipientMailAddress');
+  if (toAddress) {
+    const serviceId = Config.get('serviceId');
+    const oldIp = updatedRecords[0].oldIp;
+    const recordList = updatedRecords.map(r => `  - ${r.dnsRecord}`).join('\n');
+    try {
+      await mailer.send(
+        toAddress,
+        Mailer.generateSubject('IP address changed', serviceId),
+        `Your home IP address has changed.\n\nOld IP: ${oldIp}\nNew IP: ${ipAddress}\n\nThe following DNS records have been updated:\n${recordList}\n\nAll listed domains now point to your new IP address.`
+      );
+      if (verbose) logger(`Sent IP change notification email to ${toAddress}.`);
+    } catch (e) {
+      if (verbose) logger('Could not send IP change notification email');
+    }
+  }
+}
 
 if (errorHandler.hasErrors()) {
   errorHandler.handle();

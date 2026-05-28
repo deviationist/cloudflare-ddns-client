@@ -36,7 +36,7 @@ export default class ErrorHandler {
       
       await this.mailer.send(
         toAddress,
-        Mailer.generateSubject(this.errors.length > 1 ? 'Multiple errors' : 'Error', serviceId)
+        Mailer.generateSubject(this.errors.length > 1 ? 'Multiple errors' : 'Error', serviceId),
         `There seems to be an issue with the ${serviceName}${serviceId ? ` (${serviceId})` : ''}. See error messages below: \n${this.errors.map(error => `- ${error.message}`).join('\n')}`
       );
     } catch(error) {

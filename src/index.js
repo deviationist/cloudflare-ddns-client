@@ -6,6 +6,8 @@ import yargs from 'yargs';
 import ErrorHandler from './ErrorHandler.js';
 import Mailer from './Mailer.js';
 import Logger from './Logger.js';
+import { createRouterDriver } from './routers/index.js';
+import { readGuardState, writeGuardState } from './routers/GuardState.js';
 
 const argv = yargs(process.argv).argv;
 
@@ -29,6 +31,52 @@ if (!ipAddress) {
 }
 
 logger(`Current IP address: ${ipAddress}`);
+
+// Opt-in router guard: when a `router` driver is configured, refuse to publish
+// the detected IP while the router is on a WAN failover path / behind CGNAT
+// (where the public IP is a shared carrier address that can't route back home).
+// No `router` config -> this whole block is inert.
+const routerDriver = createRouterDriver(Config, logger);
+if (routerDriver && ipAddress) {
+  const verdict = await routerDriver.evaluate(ipAddress);
+  logger(`Router guard [${routerDriver.name}]: ${verdict.reason}`, verdict.ok ? 'log' : 'warn');
+
+  const stateFile = Config.get('router.stateFile') || null;
+  const notifyTransition = async (publishable, reason) => {
+    const prev = readGuardState(stateFile);
+    const changed = prev?.publishable !== publishable;
+    writeGuardState(stateFile, { publishable, reason, ipAddress, timestamp: new Date().toISOString() });
+    if (!stateFile || !changed || !mailer.isConfigured()) return;
+    const toAddress = Config.get('notificationMailAddress');
+    if (!toAddress) return;
+    const serviceId = Config.get('serviceId');
+    const [subject, lead] = publishable
+      ? ['DNS updates resumed', 'The router is back on a publishable public connection, so DDNS updates have resumed.']
+      : ['DNS updates paused (WAN failover/CGNAT)', 'DDNS updates were paused because the router is not on a publishable public connection. Your Cloudflare records were left pointing at the last known-good IP.'];
+    try {
+      await mailer.send(
+        toAddress,
+        Mailer.generateSubject(subject, serviceId),
+        `${lead}\n\nReason: ${reason}\n\nYou will not receive repeated emails while this state persists.`
+      );
+      logger(`Sent "${subject}" notification to ${toAddress}.`);
+    } catch (e) {
+      logger(`Could not send "${subject}" notification`, 'error');
+    }
+  };
+
+  if (verdict.ok && !verdict.publishable) {
+    await notifyTransition(false, verdict.reason);
+    logger('Skipping all DNS updates due to router guard.', 'warn');
+    process.exit(0);
+  } else if (verdict.ok) {
+    await notifyTransition(true, verdict.reason);
+  } else {
+    // Could not determine WAN state — fail open so a transient router glitch
+    // never freezes normal DDNS. State file is left untouched.
+    logger('Router guard could not determine WAN status; proceeding (fail-open).', 'warn');
+  }
+}
 
 const items = Config.get('items');
 if (!items) {

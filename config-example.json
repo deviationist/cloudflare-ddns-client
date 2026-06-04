@@ -13,6 +13,16 @@
       "password": "your-brevo-smtp-api-key"
     }
   },
+  "router": {
+    "driver": "asuswrt-merlin",
+    "stateFile": "/var/log/cloudflare-ddns/router-guard.json",
+    "options": {
+      "url": "https://192.168.1.1:8443",
+      "username": "admin",
+      "passwordEnv": "ROUTER_PASSWORD",
+      "verifySsl": false
+    }
+  },
   "items": [
     {
       "apiKey": "your-api-key",

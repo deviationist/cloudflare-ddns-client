@@ -39,7 +39,7 @@ config-example.json # copy to config.json and fill in (config.json is gitignored
 ## Running
 
 - `npm run start` — run once. `npm run dev` — watch mode (nodemon).
-- Flags: `--dryRun` (no writes), `--verbose` (console output), `--forceUpdate`
+- Flags: `--dry-run` (no writes), `--verbose` (console output), `--forceUpdate`
   (skip the "already correct?" short-circuit), `--configPath <path>`.
 - `npm run mailtest` — send a test email using the configured mailer.
 

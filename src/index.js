@@ -156,15 +156,19 @@ if (updatedRecords.length > 0 && mailer.isConfigured()) {
     const serviceId = Config.get('serviceId');
     const oldIp = updatedRecords[0].oldIp;
     const recordList = updatedRecords.map(r => `  - ${r.dnsRecord}`).join('\n');
-    try {
-      await mailer.send(
-        toAddress,
-        Mailer.generateSubject('IP address changed', serviceId),
-        `Your home IP address has changed.\n\nOld IP: ${oldIp}\nNew IP: ${ipAddress}\n\nThe following DNS records have been updated:\n${recordList}\n\nAll listed domains now point to your new IP address.`
-      );
-      logger(`Sent IP change notification email to ${toAddress}.`);
-    } catch (e) {
-      logger('Could not send IP change notification email', 'error');
+    if (dryRun) {
+      logger(`Would send IP change notification email to ${toAddress}.`);
+    } else {
+      try {
+        await mailer.send(
+          toAddress,
+          Mailer.generateSubject('IP address changed', serviceId),
+          `Your home IP address has changed.\n\nOld IP: ${oldIp}\nNew IP: ${ipAddress}\n\nThe following DNS records have been updated:\n${recordList}\n\nAll listed domains now point to your new IP address.`
+        );
+        logger(`Sent IP change notification email to ${toAddress}.`);
+      } catch (e) {
+        logger('Could not send IP change notification email', 'error');
+      }
     }
   }
 }

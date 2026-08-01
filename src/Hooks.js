@@ -60,6 +60,7 @@ export default class Hooks {
           enabled: hook.enabled !== false,
           once: hook.once !== false,
           stopOnError: hook.stopOnError === true,
+          runWhenPaused: hook.runWhenPaused === true,
           on: on.map(String),
           index
         };
@@ -71,8 +72,10 @@ export default class Hooks {
     return this.hooks.some(hook => hook.enabled);
   }
 
-  hasHooksFor(event) {
-    return this.hooks.some(hook => hook.enabled && hook.on.includes(event));
+  hasHooksFor(event, { pausedOnly = false } = {}) {
+    return this.hooks.some(hook => hook.enabled
+      && hook.on.includes(event)
+      && (!pausedOnly || hook.runWhenPaused));
   }
 
   buildEnv(hook, event, payload) {
@@ -91,11 +94,14 @@ export default class Hooks {
 
   // Runs every enabled hook subscribed to `event`, sequentially. Never rejects:
   // failures come back as results so the caller decides what they mean.
-  async dispatch(event, payload = {}) {
+  // `pausedOnly` narrows the run to hooks that opted into firing while the
+  // router guard has DNS updates paused.
+  async dispatch(event, payload = {}, { pausedOnly = false } = {}) {
     const results = [];
     for (const hook of this.hooks) {
       if (this.aborted) break;
       if (!hook.enabled || !hook.on.includes(event)) continue;
+      if (pausedOnly && !hook.runWhenPaused) continue;
 
       if (hook.once && this.executed.has(hook.index)) {
         this.logger(`Hook "${hook.name}" already ran this session, skipping "${event}".`);

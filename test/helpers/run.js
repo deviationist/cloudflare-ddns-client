@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process';
+import { spawnSync, spawn } from 'child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
@@ -73,6 +73,35 @@ export function runClient(paths, args = []) {
     ipHistory: readText(paths.ipHistoryFile),
     ipState: readText(paths.ipStateFile).trim() || null
   };
+}
+
+// A stand-in for an AsusWRT-Merlin router, speaking just enough of its HTTP
+// interface for the guard driver: a login that hands out a token cookie, and
+// nvram_get lookups answered from `nvram`. Runs in its own process — see
+// test/helpers/fake-router.js for why.
+export function startFakeRouter(nvram = {}) {
+  const child = spawn(
+    process.execPath,
+    [join(projectRoot, 'test', 'helpers', 'fake-router.js'), JSON.stringify(nvram)],
+    { stdio: ['ignore', 'pipe', 'inherit'] }
+  );
+
+  return new Promise((resolve, reject) => {
+    let buffered = '';
+    child.stdout.on('data', chunk => {
+      buffered += chunk;
+      const port = buffered.match(/PORT=(\d+)/)?.[1];
+      if (!port) return;
+      resolve({
+        url: `http://127.0.0.1:${port}`,
+        close: () => new Promise(done => {
+          child.once('exit', done);
+          child.kill();
+        })
+      });
+    });
+    child.once('error', reject);
+  });
 }
 
 // Writes an executable hook script that records the environment it was called

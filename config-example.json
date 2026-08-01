@@ -2,6 +2,7 @@
   "serviceId": "your-ddns-service",
   "logFile": "/var/log/cloudflare-ddns/app.log",
   "ipHistoryFile": "/var/log/cloudflare-ddns/ip-history.log",
+  "ipStateFile": "/var/lib/cloudflare-ddns/last-ip",
   "notificationMailAddress": "to-address@example.com",
   "mailConfig": {
     "fromAddress": "ddns@yourdomain.com",
@@ -13,6 +14,29 @@
       "password": "your-brevo-smtp-api-key"
     }
   },
+  "hooks": [
+    "/path/to/simple-script.sh",
+    {
+      "name": "brevo-ip-allowlist",
+      "on": ["publicIpChanged", "dnsRecordUpdated"],
+      "once": true,
+      "stopOnError": false,
+      "command": "/path/to/authorize-ip.sh",
+      "args": ["--provider", "brevo"],
+      "cwd": "/path/to",
+      "env": {
+        "BREVO_API_KEY": "your-brevo-api-key"
+      },
+      "timeout": 60000,
+      "shell": false,
+      "enabled": true
+    },
+    {
+      "name": "alert-on-failure",
+      "on": ["error"],
+      "command": "/path/to/alert.sh"
+    }
+  ],
   "items": [
     {
       "apiKey": "your-api-key",

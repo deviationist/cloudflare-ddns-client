@@ -1,5 +1,5 @@
 import { spawnSync } from 'child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -68,10 +68,29 @@ export function runClient(paths, args = []) {
     requests,
     updateRequests: requests.filter(request => request.method === 'PUT'),
     mails: readLines(join(paths.artifacts, 'mails.jsonl')),
+    hookCalls: readLines(join(paths.artifacts, 'hooks.jsonl')),
     log: readText(paths.logFile),
     ipHistory: readText(paths.ipHistoryFile),
     ipState: readText(paths.ipStateFile).trim() || null
   };
+}
+
+// Writes an executable hook script that records the environment it was called
+// with, then exits with `exitCode` (after optionally sleeping, to exercise
+// timeouts).
+export function hookScript(paths, name, { exitCode = 0, sleepSeconds = 0 } = {}) {
+  const file = join(paths.dir, `${name}.sh`);
+  writeFileSync(file, [
+    '#!/bin/sh',
+    `printf '{"hook":"%s","event":"%s","oldIp":"%s","newIp":"%s","records":"%s","errors":"%s","custom":"%s"}\\n' \\`,
+    `  "${name}" "$DDNS_EVENT" "$DDNS_OLD_IP" "$DDNS_NEW_IP" "$DDNS_RECORDS" "$DDNS_ERRORS" "$HOOK_CUSTOM_VAR" \\`,
+    '  >> "$DDNS_TEST_ARTIFACTS/hooks.jsonl"',
+    sleepSeconds ? `sleep ${sleepSeconds}` : '',
+    `exit ${exitCode}`,
+    ''
+  ].join('\n'));
+  chmodSync(file, 0o755);
+  return file;
 }
 
 export const mailConfig = {

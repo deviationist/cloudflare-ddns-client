@@ -128,8 +128,6 @@ export default class Hooks {
         cwd: hook.cwd,
         env: this.buildEnv(hook, event, payload),
         shell: hook.shell,
-        timeout: hook.timeout,
-        killSignal: 'SIGKILL',
         stdio: ['ignore', 'pipe', 'pipe']
       });
 
@@ -138,32 +136,55 @@ export default class Hooks {
       child.stdout.on('data', chunk => { stdout += chunk; });
       child.stderr.on('data', chunk => { stderr += chunk; });
 
+      // The timer is ours rather than spawn's own `timeout` option: that one
+      // stays armed when the spawn itself fails, holding the process open for
+      // the whole timeout after an unusable command.
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, hook.timeout);
+
+      // Settle on "exit" rather than "close": a hook that leaves a background
+      // child behind keeps the output pipes open, and waiting for those to
+      // close would hang the client for as long as that child lives — past the
+      // hook's own timeout.
+      let settled = false;
+      const settle = result => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        resolve(result);
+      };
+
       child.on('error', error => {
         this.logger(`Hook "${hook.name}" could not be executed: ${error.message}`, 'error');
-        resolve({ hook, event, success: false, error: error.message });
+        settle({ hook, event, success: false, error: error.message });
       });
 
-      child.on('close', (code, signal) => {
+      child.on('exit', (code, signal) => setImmediate(() => {
         const output = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
         if (output) this.logger(`Hook "${hook.name}" output: ${output}`);
 
-        if (signal) {
-          const message = signal === 'SIGKILL'
+        if (timedOut || signal) {
+          const message = timedOut
             ? `timed out after ${hook.timeout}ms`
             : `was killed by signal ${signal}`;
           this.logger(`Hook "${hook.name}" ${message}.`, 'error');
-          resolve({ hook, event, success: false, error: message, output });
+          settle({ hook, event, success: false, error: message, output });
           return;
         }
 
         if (code === 0) {
           this.logger(`Hook "${hook.name}" completed successfully.`);
-          resolve({ hook, event, success: true, output });
+          settle({ hook, event, success: true, output });
         } else {
           this.logger(`Hook "${hook.name}" exited with code ${code}.`, 'error');
-          resolve({ hook, event, success: false, error: `exited with code ${code}`, output });
+          settle({ hook, event, success: false, error: `exited with code ${code}`, output });
         }
-      });
+      }));
     });
   }
 }

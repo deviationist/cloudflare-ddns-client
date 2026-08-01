@@ -2,25 +2,53 @@ import { spawn } from 'child_process';
 
 const DEFAULT_TIMEOUT = 60000;
 
+export const EVENTS = ['publicIpChanged', 'dnsRecordUpdated', 'error', 'always'];
+
+// Config keys from the object form that map onto an event name.
+const EVENT_ALIASES = { onIpChange: 'dnsRecordUpdated' };
+
 export default class Hooks {
   hooks;
   logger;
   dryRun;
+  executed = new Set();
+  aborted = false;
 
   constructor(Config, logger, { dryRun = false } = {}) {
-    const configured = Config.get('hooks')?.onIpChange ?? [];
-    this.hooks = Hooks.normalize(configured);
     this.logger = logger;
     this.dryRun = dryRun;
+    this.hooks = Hooks.normalize(Config.get('hooks'));
+    this.hooks.forEach(hook => {
+      hook.on
+        .filter(event => !EVENTS.includes(event))
+        .forEach(event => this.logger(`Hook "${hook.name}" listens to unknown event "${event}", it will never fire.`, 'error'));
+    });
   }
 
-  // Accepts either a plain command string or a full hook object.
-  static normalize(hooks) {
-    if (!Array.isArray(hooks)) return [];
-    return hooks
-      .map((hook, index) => {
+  // Accepts an array of hooks, or an object keyed by event name. Each entry is
+  // either a plain command string or a full hook object.
+  static normalize(configured) {
+    if (!configured) return [];
+
+    const entries = [];
+    if (Array.isArray(configured)) {
+      configured.forEach(hook => entries.push([null, hook]));
+    } else if (typeof configured === 'object') {
+      Object.entries(configured).forEach(([key, value]) => {
+        const event = EVENT_ALIASES[key] || key;
+        (Array.isArray(value) ? value : [value]).forEach(hook => entries.push([event, hook]));
+      });
+    }
+
+    return entries
+      .map(([event, hook], index) => {
         if (typeof hook === 'string') hook = { command: hook };
         if (!hook?.command) return null;
+
+        const on = event
+          ? [event]
+          : (Array.isArray(hook.on) ? hook.on : [hook.on || 'publicIpChanged']);
+
         return {
           name: hook.name || hook.command,
           command: hook.command,
@@ -30,6 +58,9 @@ export default class Hooks {
           shell: hook.shell === true,
           timeout: Number.isFinite(hook.timeout) ? hook.timeout : DEFAULT_TIMEOUT,
           enabled: hook.enabled !== false,
+          once: hook.once !== false,
+          stopOnError: hook.stopOnError === true,
+          on: on.map(String),
           index
         };
       })
@@ -40,45 +71,62 @@ export default class Hooks {
     return this.hooks.some(hook => hook.enabled);
   }
 
-  buildEnv(hook, payload) {
+  hasHooksFor(event) {
+    return this.hooks.some(hook => hook.enabled && hook.on.includes(event));
+  }
+
+  buildEnv(hook, event, payload) {
     return {
       ...process.env,
       ...hook.env,
-      DDNS_EVENT: 'ip-change',
+      DDNS_EVENT: event,
       DDNS_OLD_IP: payload.oldIp ?? '',
       DDNS_NEW_IP: payload.newIp ?? '',
       DDNS_RECORDS: (payload.records ?? []).join(','),
+      DDNS_ERRORS: (payload.errors ?? []).join('\n'),
       DDNS_SERVICE_ID: payload.serviceId ?? '',
-      DDNS_PAYLOAD: JSON.stringify(payload)
+      DDNS_PAYLOAD: JSON.stringify({ event, ...payload })
     };
   }
 
-  // Runs every enabled hook sequentially. Resolves to an array of results;
-  // a failing hook never rejects, so one bad script can't stop the others.
-  async runIpChangeHooks(payload) {
+  // Runs every enabled hook subscribed to `event`, sequentially. Never rejects:
+  // failures come back as results so the caller decides what they mean.
+  async dispatch(event, payload = {}) {
     const results = [];
     for (const hook of this.hooks) {
-      if (!hook.enabled) {
-        this.logger(`Hook "${hook.name}" is disabled, skipping.`);
+      if (this.aborted) break;
+      if (!hook.enabled || !hook.on.includes(event)) continue;
+
+      if (hook.once && this.executed.has(hook.index)) {
+        this.logger(`Hook "${hook.name}" already ran this session, skipping "${event}".`);
         continue;
       }
+      this.executed.add(hook.index);
+
+      let result;
       if (this.dryRun) {
-        this.logger(`Would run hook "${hook.name}": ${hook.command} ${hook.args.join(' ')}`.trim());
-        results.push({ hook, skipped: true, success: true });
-        continue;
+        this.logger(`Would run hook "${hook.name}" for "${event}": ${`${hook.command} ${hook.args.join(' ')}`.trim()}`);
+        result = { hook, event, skipped: true, success: true };
+      } else {
+        result = await this.run(hook, event, payload);
       }
-      results.push(await this.run(hook, payload));
+      results.push(result);
+
+      if (!result.success && hook.stopOnError) {
+        this.aborted = true;
+        this.logger(`Hook "${hook.name}" failed and has stopOnError set, skipping all remaining hooks.`, 'error');
+      }
     }
     return results;
   }
 
-  run(hook, payload) {
+  run(hook, event, payload) {
     return new Promise(resolve => {
-      this.logger(`Running hook "${hook.name}".`);
+      this.logger(`Running hook "${hook.name}" for "${event}".`);
 
       const child = spawn(hook.command, hook.args, {
         cwd: hook.cwd,
-        env: this.buildEnv(hook, payload),
+        env: this.buildEnv(hook, event, payload),
         shell: hook.shell,
         timeout: hook.timeout,
         killSignal: 'SIGKILL',
@@ -92,7 +140,7 @@ export default class Hooks {
 
       child.on('error', error => {
         this.logger(`Hook "${hook.name}" could not be executed: ${error.message}`, 'error');
-        resolve({ hook, success: false, error: error.message });
+        resolve({ hook, event, success: false, error: error.message });
       });
 
       child.on('close', (code, signal) => {
@@ -104,16 +152,16 @@ export default class Hooks {
             ? `timed out after ${hook.timeout}ms`
             : `was killed by signal ${signal}`;
           this.logger(`Hook "${hook.name}" ${message}.`, 'error');
-          resolve({ hook, success: false, error: message, output });
+          resolve({ hook, event, success: false, error: message, output });
           return;
         }
 
         if (code === 0) {
           this.logger(`Hook "${hook.name}" completed successfully.`);
-          resolve({ hook, success: true, output });
+          resolve({ hook, event, success: true, output });
         } else {
           this.logger(`Hook "${hook.name}" exited with code ${code}.`, 'error');
-          resolve({ hook, success: false, error: `exited with code ${code}`, output });
+          resolve({ hook, event, success: false, error: `exited with code ${code}`, output });
         }
       });
     });

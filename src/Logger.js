@@ -1,4 +1,5 @@
-import { appendFileSync } from 'fs';
+import { appendFileSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
 
 export default class Logger {
   constructor({ logFile, ipHistoryFile, dryRun, verbose } = {}) {
@@ -8,18 +9,29 @@ export default class Logger {
     this.prefix = dryRun ? '[DRY RUN] ' : '';
   }
 
+  // Logging must never break the run: ensure the directory exists, and swallow
+  // any write failure (surfaced once on stderr) rather than throwing.
+  #append(file, line) {
+    try {
+      mkdirSync(dirname(file), { recursive: true });
+      appendFileSync(file, line);
+    } catch (e) {
+      console.error(`Logger: could not write to ${file}: ${e.message}`);
+    }
+  }
+
   log(message, level = 'log') {
     const prefixed = `${this.prefix}${message}`;
     if (this.verbose) console[level](prefixed);
     if (this.logFile) {
       const tag = level === 'error' ? 'ERROR' : 'INFO';
-      appendFileSync(this.logFile, `${new Date().toISOString()} [${tag}] ${prefixed}\n`);
+      this.#append(this.logFile, `${new Date().toISOString()} [${tag}] ${prefixed}\n`);
     }
   }
 
   logIpChange(oldIp, newIp, records) {
     if (!this.ipHistoryFile) return;
     const recordList = records.join(', ');
-    appendFileSync(this.ipHistoryFile, `${new Date().toISOString()}  ${oldIp} -> ${newIp}  ${recordList}\n`);
+    this.#append(this.ipHistoryFile, `${new Date().toISOString()}  ${oldIp} -> ${newIp}  ${recordList}\n`);
   }
 }

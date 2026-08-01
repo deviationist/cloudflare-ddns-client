@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node ./src/index.js",
     "dev": "nodemon --watch src ./src/index.js",
-    "mailtest": "node ./src/mailTest.js"
+    "mailtest": "node ./src/mailTest.js",
+    "hooktest": "node ./src/hookTest.js",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "author": "Robert S.",
   "license": "ISC",

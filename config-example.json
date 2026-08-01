@@ -13,6 +13,23 @@
       "password": "your-brevo-smtp-api-key"
     }
   },
+  "hooks": {
+    "onIpChange": [
+      "/path/to/simple-script.sh",
+      {
+        "name": "brevo-ip-allowlist",
+        "command": "/path/to/authorize-ip.sh",
+        "args": ["--provider", "brevo"],
+        "cwd": "/path/to",
+        "env": {
+          "BREVO_API_KEY": "your-brevo-api-key"
+        },
+        "timeout": 60000,
+        "shell": false,
+        "enabled": true
+      }
+    ]
+  },
   "items": [
     {
       "apiKey": "your-api-key",

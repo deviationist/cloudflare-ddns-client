@@ -6,12 +6,14 @@ import yargs from 'yargs';
 import ErrorHandler from './ErrorHandler.js';
 import Mailer from './Mailer.js';
 import Logger from './Logger.js';
+import Hooks from './Hooks.js';
 
 const argv = yargs(process.argv).argv;
 
 const forceUpdate = argv.forceUpdate;
 const verbose = argv.verbose;
 const dryRun = argv.dryRun;
+const skipHooks = argv.skipHooks;
 const configPath = argv.configPath;
 if (configPath) Config.filePath = configPath;
 
@@ -100,6 +102,28 @@ if (updatedRecords.length > 0) {
     ipAddress,
     updatedRecords.map(r => r.dnsRecord)
   );
+}
+
+// Hooks run before the notification mail on purpose: a hook may be what makes
+// outbound mail work again after an IP change (e.g. re-authorizing the new IP
+// with the SMTP provider).
+if (updatedRecords.length > 0 && !skipHooks) {
+  const hooks = new Hooks(Config, logger, { dryRun });
+  if (hooks.isConfigured()) {
+    const results = await hooks.runIpChangeHooks({
+      oldIp: updatedRecords[0].oldIp,
+      newIp: ipAddress,
+      records: updatedRecords.map(r => r.dnsRecord),
+      serviceId: Config.get('serviceId') || null,
+      dryRun: !!dryRun
+    });
+    results.filter(result => !result.success).forEach(result => {
+      errorHandler.add({
+        message: `Hook "${result.hook.name}" failed: ${result.error}`,
+        ipAddress
+      });
+    });
+  }
 }
 
 if (updatedRecords.length > 0 && mailer.isConfigured()) {

@@ -11,6 +11,7 @@ import Logger from '../src/Logger.js';
 import Mailer from '../src/Mailer.js';
 import ErrorHandler from '../src/ErrorHandler.js';
 import { serviceName } from '../src/Constants.js';
+import AsuswrtMerlin from '../src/routers/AsuswrtMerlin.js';
 
 const dirs = [];
 const workDir = () => {
@@ -381,5 +382,141 @@ describe('ErrorHandler', () => {
 
     // Returns before the process.exit(1) it would otherwise reach.
     await assert.doesNotReject(() => handler.handle());
+  });
+});
+
+describe('AsuswrtMerlin transports', () => {
+  const driver = (options, ssh) => {
+    const d = new AsuswrtMerlin(options);
+    if (ssh) d.runSsh = ssh;
+    return d;
+  };
+
+  // The nvram dump this router would return: on its primary uplink, with the
+  // 4G dongle idle on a private address (the real-world shape — carriers hand
+  // out 10.x as readily as the RFC6598 range).
+  const primaryDump = args => {
+    assert.ok(args.includes('-o') && args.includes('BatchMode=yes'), 'must run non-interactively');
+    return [
+      'wans_dualwan=wan usb',
+      'wan0_primary=1',
+      'wan1_primary=0',
+      'wan0_ipaddr=203.0.113.42',
+      'wan1_ipaddr=10.125.124.117',
+      'wan0_realip_state=2',
+      'wan0_realip_ip=203.0.113.42',
+      ''
+    ].join('\n');
+  };
+
+  test('reads WAN state over ssh with no password configured', async () => {
+    const d = driver({ transport: 'ssh', ssh: { host: 'router' } }, async args => primaryDump(args));
+
+    const verdict = await d.evaluate();
+
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.publishable, true);
+    assert.equal(verdict.detail.transport, 'ssh');
+  });
+
+  test('pauses when the router has failed over to the secondary WAN', async () => {
+    const d = driver({ transport: 'ssh', ssh: { host: 'router' } }, async () => [
+      'wans_dualwan=wan usb',
+      'wan1_primary=1',
+      'wan1_ipaddr=10.125.124.117',
+      ''
+    ].join('\n'));
+
+    const verdict = await d.evaluate();
+
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.publishable, false);
+    assert.match(verdict.reason, /secondary WAN/);
+  });
+
+  test('pauses on a CGNAT address even while nominally on the primary WAN', async () => {
+    const d = driver({ transport: 'ssh', ssh: { host: 'router' } }, async () => [
+      'wans_dualwan=wan none',
+      'wan1_primary=0',
+      'wan0_ipaddr=100.64.12.9',
+      ''
+    ].join('\n'));
+
+    const verdict = await d.evaluate();
+
+    assert.equal(verdict.publishable, false);
+    assert.match(verdict.reason, /private\/CGNAT range/);
+  });
+
+  test('sends one ssh invocation for every key, not one per key', async () => {
+    let calls = 0;
+    const d = driver({ transport: 'ssh', ssh: { host: 'router' } }, async args => { calls++; return primaryDump(args); });
+
+    await d.evaluate();
+
+    assert.equal(calls, 1);
+  });
+
+  test('passes user, port and identity through to ssh', async () => {
+    let seen = null;
+    const d = driver(
+      { transport: 'ssh', ssh: { host: 'r.example', user: 'admin', port: 2222, identityFile: '/k/id' } },
+      async args => { seen = args; return primaryDump(args); }
+    );
+
+    await d.evaluate();
+
+    assert.ok(seen.includes('admin@r.example'));
+    assert.deepEqual(seen.slice(seen.indexOf('-p'), seen.indexOf('-p') + 2), ['-p', '2222']);
+    assert.deepEqual(seen.slice(seen.indexOf('-i'), seen.indexOf('-i') + 2), ['-i', '/k/id']);
+  });
+
+  test('refuses to interpolate an unsafe nvram key into the remote command', async () => {
+    const d = driver({ transport: 'ssh', ssh: { host: 'router' } }, async () => '');
+
+    await assert.rejects(() => d.readViaSsh(['wan0_ipaddr; rm -rf /']), /unsafe nvram key/);
+  });
+
+  test('auto falls back to the web transport when ssh fails', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error('unused'); };
+    const d = driver(
+      { ssh: { host: 'router' }, url: 'https://192.0.2.1:8443', username: 'admin', password: 'pw' },
+      async () => { throw new Error('ssh: connection refused'); }
+    );
+    d.readViaWeb = async () => ({ wans_dualwan: 'wan none', wan1_primary: '0', wan0_ipaddr: '203.0.113.42' });
+
+    const verdict = await d.evaluate();
+
+    assert.equal(verdict.publishable, true);
+    assert.equal(verdict.detail.transport, 'web');
+    globalThis.fetch = originalFetch;
+  });
+
+  test('reports could-not-determine when every transport fails, so the core fails open', async () => {
+    const d = driver({ ssh: { host: 'router' } }, async () => { throw new Error('connection refused'); });
+
+    const verdict = await d.evaluate();
+
+    assert.equal(verdict.ok, false);
+    assert.match(verdict.reason, /connection refused/);
+  });
+
+  test('is unusable, and says why, when nothing is configured', async () => {
+    const verdict = await driver({}).evaluate();
+
+    assert.equal(verdict.ok, false);
+    assert.match(verdict.reason, /not usable/);
+  });
+
+  test('reads username and password from the environment when asked to', () => {
+    process.env.TEST_ROUTER_USER = 'kranse';
+    process.env.TEST_ROUTER_PW = 'pw';
+    const d = new AsuswrtMerlin({ usernameEnv: 'TEST_ROUTER_USER', passwordEnv: 'TEST_ROUTER_PW' });
+
+    assert.equal(d.username, 'kranse');
+    assert.equal(d.password, 'pw');
+    delete process.env.TEST_ROUTER_USER;
+    delete process.env.TEST_ROUTER_PW;
   });
 });

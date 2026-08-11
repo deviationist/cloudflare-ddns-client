@@ -1,13 +1,14 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync } from 'fs';
 import {
   runClient,
   createWorkspace,
   cleanupWorkspaces,
   changeScenario,
   hookScript,
-  startFakeRouter
+  startFakeRouter,
+  mailConfig
 } from './helpers/run.js';
 
 after(cleanupWorkspaces);
@@ -163,5 +164,24 @@ describe('router guard with hooks', () => {
 
     assert.doesNotMatch(result.stdout, /Router guard/);
     assert.equal(result.updateRequests.length, 1);
+  });
+});
+
+describe('router guard side effects', () => {
+  // A dry run that mails "DNS updates resumed" reports a transition that never
+  // happened, and worse, consumes the real one: the state file it writes makes
+  // the next genuine run see no change and stay silent.
+  test('a dry run neither writes guard state nor sends mail', async () => {
+    const { paths, router } = await guardWorkspace({ nvram: ON_PRIMARY, hooks: () => [] });
+    const config = JSON.parse(readFileSync(paths.config, 'utf-8'));
+    config.mailConfig = mailConfig;
+    config.notificationMailAddress = 'ops@example.com';
+    writeFileSync(paths.config, JSON.stringify(config, null, 2));
+
+    const result = runClient(paths, ['--dry-run', '--verbose']);
+    await router.close();
+
+    assert.equal(result.mails.length, 0);
+    assert.equal(existsSync(`${paths.dir}/router-guard.json`), false);
   });
 });

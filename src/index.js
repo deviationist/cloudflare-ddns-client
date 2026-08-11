@@ -84,6 +84,13 @@ if (routerDriver && ipAddress) {
   const notifyTransition = async (publishable, reason) => {
     const prev = readGuardState(stateFile);
     const changed = prev?.publishable !== publishable;
+    // A dry run must not move the guard's state or mail anyone: doing so both
+    // lies about a transition that never happened and consumes the real one, so
+    // the next genuine run stays silent.
+    if (dryRun) {
+      if (changed) logger(`Would record guard transition to ${publishable ? 'publishable' : 'paused'} and notify.`);
+      return;
+    }
     writeGuardState(stateFile, { publishable, reason, ipAddress, timestamp: new Date().toISOString() });
     if (!stateFile || !changed || !mailer.isConfigured()) return;
     const toAddress = Config.get('notificationMailAddress');

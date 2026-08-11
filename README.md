@@ -171,7 +171,8 @@ contract (see `src/routers/RouterDriver.js`) and registering it in
 
 - `passwordEnv` — name of the **environment variable** holding the router
   password (the password is never stored in `config.json`). Export it before
-  running, e.g. `ROUTER_PASSWORD=... node ./src/index.js`.
+  running, e.g. `ROUTER_PASSWORD=... node ./src/index.js`, or keep it in a `.env`
+  file and let node load it — see *Supplying the router password* below.
 - `verifySsl` — set `false` for a router's self-signed certificate; `true` (the
   default) if you reach it through a valid certificate.
 - `stateFile` — optional. When set, a "DNS updates paused / resumed" email is
@@ -184,6 +185,27 @@ the router has failed over to its **secondary WAN**; the active WAN IP is in a
 private/CGNAT range (incl. `100.64.0.0/10`); or the router's own external-IP
 probe disagrees with its WAN IP (an upstream NAT). If the router can't be
 reached, the guard **fails open** so a transient glitch never freezes DDNS.
+
+#### Supplying the router password
+
+Copy `.env.example` to `.env`, set `ROUTER_PASSWORD`, and `chmod 600 .env`. Node
+loads it natively — no dependency, no dotenv:
+
+```
+node --env-file-if-exists=./.env ./src/index.js
+```
+
+`--env-file-if-exists` rather than `--env-file` so the client still starts on a
+host where the guard isn't configured and no `.env` exists.
+
+Prefer this over putting the password in the crontab line directly: cron treats
+an unescaped `%` as a newline, so a password containing one is silently
+truncated. Keeping it in `.env` sidesteps that entirely.
+
+Note the router account needs access to the **web UI** specifically. On Asus
+firmware with *Administration → System → Access Restriction* enabled, a client
+allowed only SSH can still reach the router yet gets a filtered port on the
+web-UI port, and the guard will fail open on every run.
 
 ### Cron setup
 

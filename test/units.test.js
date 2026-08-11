@@ -86,8 +86,15 @@ describe('Ip', () => {
   const originalFetch = globalThis.fetch;
   after(() => { globalThis.fetch = originalFetch; });
 
+  const ok = body => ({ ok: true, status: 200, text: async () => body });
+  const errorPage = status => ({
+    ok: false,
+    status,
+    text: async () => `<html>\n<head><title>${status} Bad Gateway</title></head>\n</html>`
+  });
+
   test('trims the whitespace off the public IP', async () => {
-    globalThis.fetch = async () => ({ text: async () => '  203.0.113.42\n' });
+    globalThis.fetch = async () => ok('  203.0.113.42\n');
 
     assert.equal(await Ip.get(), '203.0.113.42');
   });
@@ -95,22 +102,105 @@ describe('Ip', () => {
   test('returns false when the lookup throws', async () => {
     globalThis.fetch = async () => { throw new Error('network down'); };
 
-    assert.equal(await Ip.get(), false);
+    assert.equal(await Ip.get({ sources: ['https://one.example'] }), false);
+  });
+
+  // The 2026-08-11 outage: the source answered 502/500/504 with an HTML error
+  // page, and the whole page was published as the A record's content.
+  test('never returns the body of an HTTP error response', async () => {
+    globalThis.fetch = async () => errorPage(502);
+
+    assert.equal(await Ip.get({ sources: ['https://one.example'] }), false);
+  });
+
+  test('rejects a 200 response that is not an IPv4 address', async () => {
+    globalThis.fetch = async () => ok('<html><body>hello</body></html>');
+
+    assert.equal(await Ip.get({ sources: ['https://one.example'] }), false);
+  });
+
+  test('rejects an IPv6 answer, because the records written are A records', async () => {
+    globalThis.fetch = async () => ok('2606:4700:4700::1111');
+
+    assert.equal(await Ip.get({ sources: ['https://one.example'] }), false);
+  });
+
+  test('falls back to the next source when the first one errors', async () => {
+    const seen = [];
+    globalThis.fetch = async url => {
+      seen.push(String(url));
+      return String(url).includes('one') ? errorPage(504) : ok('203.0.113.42');
+    };
+
+    const result = await Ip.get({ sources: ['https://one.example', 'https://two.example'] });
+
+    assert.equal(result, '203.0.113.42');
+    assert.deepEqual(seen, ['https://one.example', 'https://two.example']);
+  });
+
+  test('falls back when a source throws rather than answering', async () => {
+    globalThis.fetch = async url => {
+      if (String(url).includes('one')) throw new Error('network down');
+      return ok('203.0.113.42');
+    };
+
+    assert.equal(await Ip.get({ sources: ['https://one.example', 'https://two.example'] }), '203.0.113.42');
+  });
+
+  test('stops at the first usable source', async () => {
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; return ok('203.0.113.42'); };
+
+    await Ip.get({ sources: ['https://one.example', 'https://two.example'] });
+
+    assert.equal(calls, 1);
+  });
+
+  test('reports each failing source to the logger without echoing the body', async () => {
+    globalThis.fetch = async () => errorPage(502);
+    const lines = [];
+
+    await Ip.get({ sources: ['https://one.example'], logger: message => lines.push(message) });
+
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /https:\/\/one\.example/);
+    assert.match(lines[0], /502/);
+    assert.doesNotMatch(lines[0], /<html>/);
+  });
+
+  test('defaults to more than one source', async () => {
+    assert.ok(Ip.sources.length > 1);
   });
 
   test('resolves a record through DNS-over-HTTPS', async () => {
     globalThis.fetch = async url => {
       assert.match(String(url), /1\.1\.1\.1\/dns-query\?name=domain\.com/);
-      return { json: async () => ({ Answer: [{ data: '203.0.113.42' }] }) };
+      return { ok: true, status: 200, json: async () => ({ Answer: [{ data: '203.0.113.42' }] }) };
     };
 
     assert.equal(await Ip.resolve('domain.com'), '203.0.113.42');
   });
 
+  test('skips a CNAME answer and returns the A record behind it', async () => {
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ Answer: [{ data: 'alias.example.com' }, { data: '203.0.113.42' }] })
+    });
+
+    assert.equal(await Ip.resolve('domain.com'), '203.0.113.42');
+  });
+
   test('returns undefined for a record with no answer', async () => {
-    globalThis.fetch = async () => ({ json: async () => ({}) });
+    globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({}) });
 
     assert.equal(await Ip.resolve('domain.com'), undefined);
+  });
+
+  test('returns false when the resolver answers with an HTTP error', async () => {
+    globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
+
+    assert.equal(await Ip.resolve('domain.com'), false);
   });
 
   test('returns false when the resolve throws', async () => {
@@ -162,6 +252,40 @@ describe('Cloudflare', () => {
 
     globalThis.fetch = async () => { throw new Error('network down'); };
     assert.equal(await Cloudflare.updateDnsRecord('key', 'z1', 'rec-1', payload), false);
+  });
+
+  test('logs the reason Cloudflare gave for rejecting an update', async () => {
+    globalThis.fetch = async () => ({
+      status: 400,
+      json: async () => ({ errors: [{ message: 'Content for A record must be a valid IPv4 address' }] })
+    });
+    const lines = [];
+
+    await Cloudflare.updateDnsRecord('key', 'z1', 'rec-1', {}, message => lines.push(message));
+
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /400/);
+    assert.match(lines[0], /must be a valid IPv4 address/);
+  });
+
+  test('survives an error body that is not the documented JSON shape', async () => {
+    globalThis.fetch = async () => ({
+      status: 502,
+      json: async () => { throw new Error('Unexpected token < in JSON'); }
+    });
+    const lines = [];
+
+    assert.equal(await Cloudflare.updateDnsRecord('key', 'z1', 'rec-1', {}, m => lines.push(m)), false);
+    assert.match(lines[0], /unparseable error body/);
+  });
+
+  test('logs the reason a request failed outright', async () => {
+    globalThis.fetch = async () => { throw new Error('network down'); };
+    const lines = [];
+
+    await Cloudflare.updateDnsRecord('key', 'z1', 'rec-1', {}, message => lines.push(message));
+
+    assert.match(lines[0], /network down/);
   });
 });
 

@@ -219,6 +219,67 @@ describe('failures', () => {
     assert.equal(result.updateRequests.length, 0);
   });
 
+  // Regression, 2026-08-11: every IP source was serving nginx error pages, the
+  // client took the HTML as its public IP, and tried to write that into an A
+  // record on both hosts. Cloudflare's own validation was the only thing that
+  // stopped it being published.
+  test('an HTML error page from every IP source never reaches Cloudflare', () => {
+    const errorPage = {
+      status: 502,
+      body: '<html>\n<head><title>502 Bad Gateway</title></head>\n<body>\n<center><h1>502 Bad Gateway</h1></center>\n</body>\n</html>'
+    };
+    const paths = createWorkspace({
+      config: singleRecordConfig({ mailConfig, notificationMailAddress: 'ops@example.com' }),
+      scenario: changeScenario({ publicIp: errorPage })
+    });
+    const result = runClient(paths);
+
+    assert.equal(result.code, 1);
+    assert.equal(result.updateRequests.length, 0);
+    assert.equal(result.requests.filter(request => request.url.includes('dns_records')).length, 0);
+    assert.doesNotMatch(result.log, /<html>/);
+    assert.match(result.mails[0].text, /Could not obtain IP address from any source/);
+  });
+
+  test('a 200 response that is not an IP address is not published', () => {
+    const paths = createWorkspace({
+      config: singleRecordConfig({ mailConfig, notificationMailAddress: 'ops@example.com' }),
+      scenario: changeScenario({ publicIp: { status: 200, body: 'Service Temporarily Unavailable' } })
+    });
+    const result = runClient(paths);
+
+    assert.equal(result.code, 1);
+    assert.equal(result.updateRequests.length, 0);
+  });
+
+  test('one failing IP source falls through to the next and the update proceeds', () => {
+    const paths = createWorkspace({
+      config: singleRecordConfig(),
+      scenario: changeScenario({
+        ipResponses: {
+          'checkip.amazonaws.com': { status: 504, body: '<html><title>504 Gateway Time-out</title></html>' },
+          'api.ipify.org': '203.0.113.42'
+        }
+      })
+    });
+    const result = runClient(paths);
+
+    assert.equal(result.code, 0);
+    assert.equal(result.updateRequests.length, 1);
+    assert.equal(result.updateRequests[0].body.content, '203.0.113.42');
+  });
+
+  test('the alert names which record failed, not just that one did', () => {
+    const paths = createWorkspace({
+      config: singleRecordConfig({ mailConfig, notificationMailAddress: 'ops@example.com' }),
+      scenario: changeScenario({ cfUpdate: 400 })
+    });
+    const result = runClient(paths);
+
+    assert.match(result.mails[0].text, /Could not update DNS-record for domain\.com/);
+    assert.match(result.mails[0].text, /203\.0\.113\.42/);
+  });
+
   test('missing configuration exits non-zero without touching the network', () => {
     const paths = createWorkspace({ config: {}, scenario: { publicIp: '203.0.113.42' } });
     const result = runClient(paths, ['--verbose']);

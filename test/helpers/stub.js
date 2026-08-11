@@ -10,11 +10,18 @@ const artifacts = process.env.DDNS_TEST_ARTIFACTS;
 
 const record = (file, entry) => appendFileSync(join(artifacts, file), `${JSON.stringify(entry)}\n`);
 
+const isOk = status => status >= 200 && status < 300;
+
 const jsonResponse = (status, body) => ({
+  ok: isOk(status),
   status,
   json: async () => body,
   text: async () => JSON.stringify(body)
 });
+
+// Every host Ip.sources knows about, so a scenario can fail one and let the
+// client fall through to the next.
+const ipSourceHosts = ['checkip.amazonaws.com', 'api.ipify.org', 'icanhazip.com'];
 
 globalThis.fetch = async (url, options = {}) => {
   const target = String(url);
@@ -26,9 +33,18 @@ globalThis.fetch = async (url, options = {}) => {
     authorization: options.headers?.Authorization ?? null
   });
 
-  if (target.includes('checkip.amazonaws.com')) {
-    if (scenario.publicIp === 'THROW') throw new Error('stub: public IP lookup failed');
-    return { status: 200, text: async () => `${scenario.publicIp}\n` };
+  const ipSourceHost = ipSourceHosts.find(host => target.includes(host));
+  if (ipSourceHost) {
+    // `ipResponses` keys a per-source answer by host, for testing fallback;
+    // otherwise every source gives the scenario's single `publicIp`.
+    const spec = scenario.ipResponses?.[ipSourceHost] ?? scenario.publicIp;
+    if (spec === 'THROW') throw new Error('stub: public IP lookup failed');
+    // An object is the "this source is misbehaving" form: an explicit status
+    // with an arbitrary body, e.g. a 502 HTML error page.
+    if (spec !== null && typeof spec === 'object') {
+      return { ok: isOk(spec.status), status: spec.status, text: async () => spec.body ?? '' };
+    }
+    return { ok: true, status: 200, text: async () => `${spec}\n` };
   }
 
   if (target.includes('dns-query')) {

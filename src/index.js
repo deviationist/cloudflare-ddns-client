@@ -30,9 +30,13 @@ const mailer = new Mailer(Config);
 const hooks = new Hooks(Config, logger, { dryRun });
 const ipState = new IpState(Config.get('ipStateFile') || null, logger);
 
-const ipAddress = await Ip.get();
+const ipAddress = await Ip.get({ logger, sources: Config.get('ipSources') || undefined });
 if (!ipAddress) {
-  errorHandler.add({ message: 'Could not obtain IP address' }).handle();
+  // Nothing below can do anything useful without an address, and handle() only
+  // exits when a mailer is configured — so exit here regardless rather than
+  // carrying a falsy IP into the update loop.
+  await errorHandler.add({ message: 'Could not obtain IP address from any source' }).handle();
+  process.exit(1);
 }
 
 logger(`Current IP address: ${ipAddress}`);
@@ -184,7 +188,7 @@ await Promise.all(items.flatMap(item =>
           content: ipAddress,
           ttl: 1,
           proxied: false
-        });
+        }, logger);
       }
 
       if (success) {
@@ -192,7 +196,11 @@ await Promise.all(items.flatMap(item =>
         updatedRecords.push({ dnsRecord, oldIp, newIp: ipAddress });
       } else {
         errorHandler.add({
-          message: 'Could not update DNS-record',
+          // Named, because the alert mail lists only these messages — two bare
+          // "Could not update DNS-record" lines say nothing about which records.
+          // Unquoted on purpose: this string is passed to hook scripts as
+          // DDNS_ERRORS, where embedded quotes break naive consumers.
+          message: `Could not update DNS-record for ${dnsRecord} (tried to set ${ipAddress})`,
           ipAddress,
           dnsRecord,
           zone: zone.name

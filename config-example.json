@@ -3,6 +3,11 @@
   "logFile": "/var/log/cloudflare-ddns/app.log",
   "ipHistoryFile": "/var/log/cloudflare-ddns/ip-history.log",
   "ipStateFile": "/var/lib/cloudflare-ddns/last-ip",
+  "ipSources": [
+    "https://checkip.amazonaws.com",
+    "https://api.ipify.org",
+    "https://icanhazip.com"
+  ],
   "notificationMailAddress": "to-address@example.com",
   "mailConfig": {
     "fromAddress": "ddns@yourdomain.com",

@@ -357,6 +357,22 @@ Use [crontab.guru](https://crontab.guru/) to find a different interval.
 
 ## TODO / Roadmap
 
+- **Verify the guard's pause path against a real failover.** Every pause verdict
+  so far has come from synthetic router state — unit tests, the fake router, and
+  `npm run test:router` against a live router that was healthy at the time. The
+  logic is well covered, but the end-to-end path (router fails over → guard
+  pauses → records stay on the last known-good IP → "paused" mail → recovery)
+  has never run for real.
+
+  To exercise it: drop the primary WAN and let the router move to its secondary
+  uplink. Expect DNS updates to stop, records to hold their previous value, one
+  "DNS updates paused" mail per configured host, and a matching "resumed" mail
+  once the primary returns.
+
+  Note this generally **cannot be tested remotely.** The condition being tested
+  is precisely the one that removes inbound reachability, so a VPN or any other
+  remote path into the network goes down with it. It wants doing on-site.
+
 - **IPv6 (AAAA) support.** The client currently manages IPv4 `A` records only
   (the record type is hardcoded to `A`, and the IP is sourced from an IPv4-only
   endpoint). Planned: make the record `type` configurable per DNS record

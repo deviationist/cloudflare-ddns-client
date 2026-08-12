@@ -9,7 +9,8 @@
     "dev": "nodemon --watch src ./src/index.js",
     "mailtest": "node ./src/mailTest.js",
     "hooktest": "node ./src/hookTest.js",
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test \"test/**/*.test.js\"",
+    "test:router": "DDNS_TEST_ROUTER=1 node --env-file-if-exists=./.env --test \"test/router-integration.test.js\""
   },
   "author": "Robert S.",
   "license": "ISC",

@@ -12,6 +12,7 @@ import Mailer from '../src/Mailer.js';
 import ErrorHandler from '../src/ErrorHandler.js';
 import { serviceName } from '../src/Constants.js';
 import AsuswrtMerlin from '../src/routers/AsuswrtMerlin.js';
+import { startFakeRouter } from './helpers/run.js';
 
 const dirs = [];
 const workDir = () => {
@@ -518,5 +519,119 @@ describe('AsuswrtMerlin transports', () => {
     assert.equal(d.password, 'pw');
     delete process.env.TEST_ROUTER_USER;
     delete process.env.TEST_ROUTER_PW;
+  });
+});
+
+describe('AsuswrtMerlin transport selection', () => {
+  const NVRAM_PRIMARY = { wans_dualwan: 'wan none', wan1_primary: '0', wan0_ipaddr: '203.0.113.42' };
+  const sshDump = values => Object.entries(values).map(([k, v]) => `${k}=${v}`).join('\n');
+  // A port nothing listens on: if the web transport is attempted, it fails.
+  const DEAD_WEB = { url: 'http://127.0.0.1:1', username: 'admin', password: 'pw' };
+
+  const withRouter = async (nvram, fn) => {
+    const router = await startFakeRouter(nvram);
+    try {
+      return await fn(router);
+    } finally {
+      await router.close();
+    }
+  };
+
+  test('web transport, explicitly selected, talks to the router over HTTP', async () =>
+    withRouter(NVRAM_PRIMARY, async router => {
+      const d = new AsuswrtMerlin({ transport: 'web', url: router.url, username: 'admin', password: 'pw' });
+
+      const verdict = await d.evaluate();
+
+      assert.equal(verdict.ok, true);
+      assert.equal(verdict.publishable, true);
+      assert.equal(verdict.detail.transport, 'web');
+    }));
+
+  test('auto prefers ssh when both transports are configured', async () => {
+    const d = new AsuswrtMerlin({ ...DEAD_WEB, ssh: { host: 'router' } });
+    d.runSsh = async () => sshDump(NVRAM_PRIMARY);
+
+    const verdict = await d.evaluate();
+
+    // Succeeds despite the web side pointing at a dead port, so ssh was used.
+    assert.equal(verdict.detail.transport, 'ssh');
+  });
+
+  test('auto falls back to the real web transport when ssh fails', async () =>
+    withRouter(NVRAM_PRIMARY, async router => {
+      const d = new AsuswrtMerlin({ url: router.url, username: 'admin', password: 'pw', ssh: { host: 'router' } });
+      d.runSsh = async () => { throw new Error('ssh: connection refused'); };
+
+      const verdict = await d.evaluate();
+
+      assert.equal(verdict.ok, true);
+      assert.equal(verdict.detail.transport, 'web');
+    }));
+
+  // Pinning a transport must mean it, or a host deliberately kept off the
+  // router's web UI would quietly start trying to reach it.
+  test('an explicit ssh transport does not fall back to web', async () =>
+    withRouter(NVRAM_PRIMARY, async router => {
+      const d = new AsuswrtMerlin({
+        transport: 'ssh', ssh: { host: 'router' },
+        url: router.url, username: 'admin', password: 'pw'
+      });
+      d.runSsh = async () => { throw new Error('ssh: connection refused'); };
+
+      const verdict = await d.evaluate();
+
+      assert.equal(verdict.ok, false);
+      assert.match(verdict.reason, /ssh: connection refused/);
+    }));
+
+  test('an explicit web transport ignores a configured ssh block', async () => {
+    let sshCalled = false;
+    const d = new AsuswrtMerlin({ transport: 'web', ...DEAD_WEB, ssh: { host: 'router' } });
+    d.runSsh = async () => { sshCalled = true; return sshDump(NVRAM_PRIMARY); };
+
+    const verdict = await d.evaluate();
+
+    assert.equal(sshCalled, false);
+    assert.equal(verdict.ok, false);
+  });
+});
+
+describe('AsuswrtMerlin upstream-NAT signal', () => {
+  const dump = values => Object.entries(values).map(([k, v]) => `${k}=${v}`).join('\n');
+  const evaluate = async values => {
+    const d = new AsuswrtMerlin({ transport: 'ssh', ssh: { host: 'router' } });
+    d.runSsh = async () => dump(values);
+    return d.evaluate();
+  };
+
+  test('pauses when the router external probe disagrees with the WAN IP', async () => {
+    const verdict = await evaluate({
+      wans_dualwan: 'wan none', wan1_primary: '0',
+      wan0_ipaddr: '192.0.2.10', wan0_realip_state: '2', wan0_realip_ip: '198.51.100.7'
+    });
+
+    assert.equal(verdict.publishable, false);
+    assert.match(verdict.reason, /upstream NAT detected/);
+  });
+
+  // realip_state 0 means the probe never ran — the case on an idle secondary
+  // WAN. A blank result must not be read as "the addresses disagree".
+  test('does not fire when the external probe never ran', async () => {
+    const verdict = await evaluate({
+      wans_dualwan: 'wan none', wan1_primary: '0',
+      wan0_ipaddr: '192.0.2.10', wan0_realip_state: '0', wan0_realip_ip: ''
+    });
+
+    assert.equal(verdict.publishable, true);
+  });
+
+  test('does not fire when probe and WAN IP agree', async () => {
+    const verdict = await evaluate({
+      wans_dualwan: 'wan none', wan1_primary: '0',
+      wan0_ipaddr: '192.0.2.10', wan0_realip_state: '2', wan0_realip_ip: '192.0.2.10'
+    });
+
+    assert.equal(verdict.publishable, true);
   });
 });

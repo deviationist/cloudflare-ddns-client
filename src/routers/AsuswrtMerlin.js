@@ -23,7 +23,7 @@ const USER_AGENT = 'asusrouter-Android-DUTUtil-1.0.0.201';
 
 // Read in one go so the ssh transport needs a single round trip, and so the
 // active-WAN index can be decided from the values rather than by re-querying.
-const NVRAM_KEYS = [
+export const NVRAM_KEYS = [
   'wans_dualwan',
   'wan0_primary',
   'wan1_primary',

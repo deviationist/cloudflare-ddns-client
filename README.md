@@ -101,7 +101,7 @@ The first run with no recorded IP is treated as a baseline: the IP is written to
 | `shell` | `false` | Set to `true` to run the command through a shell (needed for pipes, globbing, etc.). |
 | `once` | `true` | Run at most once per run. A hook listening to several events fires on the first one that triggers and is skipped for the rest. Set to `false` to run it once per matching event. |
 | `stopOnError` | `false` | If this hook fails, skip all remaining hooks for the rest of the run — including hooks for later events. |
-| `runWhenPaused` | `false` | Run this hook even when the WAN failover/CGNAT guard has paused DNS updates. See below. |
+| `runWhenPaused` | `false` | Run this hook even when the reachability guard has paused DNS updates. See below. |
 | `enabled` | `true` | Set to `false` to keep a hook in the config without running it. |
 
 #### Environment passed to hooks
@@ -116,9 +116,9 @@ The first run with no recorded IP is treated as a baseline: the IP is written to
 | `DDNS_SERVICE_ID` | `your-ddns-service` |
 | `DDNS_PAYLOAD` | the same data as a JSON object |
 
-#### Hooks and the WAN failover guard
+#### Hooks and the reachability guard
 
-When the [WAN failover / CGNAT guard](#wan-failover--cgnat-guard-optional-driver-based) pauses DNS updates, hooks are skipped along with them — with one exception: a hook with `runWhenPaused: true` still fires for `publicIpChanged`.
+When the [reachability guard](#publish-only-a-reachable-ip-cgnat--wan-failover-guard) pauses DNS updates, hooks are skipped along with them — with one exception: a hook with `runWhenPaused: true` still fires for `publicIpChanged`.
 
 That exists because the two concerns pull in opposite directions. Publishing a CGNAT address to DNS is wrong, so updates stop. But that carrier address *is* where your outbound traffic now comes from, so anything keyed on your egress IP — an SMTP provider's IP allowlist, for instance — needs to know about it precisely while the guard is active.
 
@@ -139,14 +139,37 @@ npm run hooktest
 ```
 
 It runs the hooks for `publicIpChanged` with placeholder values. Override with `--event` (comma-separated), `--oldIp`, `--newIp` and `--records`, e.g. `node ./src/hookTest.js --event publicIpChanged,error --newIp 203.0.113.42 --records domain.com,foo.com`.
-### WAN failover / CGNAT guard (optional, driver-based)
+### Publish only a reachable IP (CGNAT / WAN failover guard)
 
-If your connection can fall back to a path that sits behind carrier-grade NAT
-(CGNAT) — for example a 4G/5G USB modem used as WAN failover — the public IP
-seen from the internet becomes a *shared* carrier address that cannot route back
-to your network. Publishing it would point your domain at a dead address. This
-optional guard asks your router whether it is currently on such a path and, if
-so, **skips the update and leaves your records on the last known-good IP**.
+A public IP is not the same thing as a *reachable* one. Behind carrier-grade
+NAT (CGNAT) — Starlink, mobile broadband, a 4G/5G modem on WAN failover, or an
+ISP that has simply run out of IPv4 — the address the internet sees is a
+*shared* carrier address that cannot route back to you. Publish it and your
+domain points at somewhere nobody can reach.
+
+That failure is silent, which is what makes it worth guarding. The DDNS update
+succeeds, the record changes, nothing errors; the address just doesn't come
+back to you. Nothing in the client's own view can tell the difference, because
+the echo service returns a perfectly well-formed address either way.
+
+So this optional guard asks your **router** what its uplink actually looks like
+and, when the answer means inbound traffic can't arrive, **skips the update and
+leaves your records on the last known-good IP**.
+
+Two things worth being clear about:
+
+- **It infers, it does not probe.** It reads router state and concludes; it
+  never tests reachability from outside. That keeps it cheap and dependency-free,
+  but it only catches causes a driver knows to look for.
+- **It assumes you use DDNS for inbound reachability.** If you run DDNS purely
+  to track your *egress* address — an SMTP or API allowlist, say — then pausing
+  is the wrong behaviour for you, and hooks are the answer: see
+  [Hooks and the guard](#hooks-and-the-reachability-guard). DNS records are for
+  getting traffic *in*; a hook can still consume the address you now go *out*
+  from, precisely while updates are paused.
+
+CGNAT is the most common cause, not the definition — the guard also pauses on a
+plain WAN failover, and on an upstream NAT that is not carrier-grade at all.
 
 The feature is **opt-in and driver-based**: add a `router` block to
 `config.json` to enable it; omit it and the client behaves exactly as before.
@@ -298,7 +321,32 @@ npm test
 Runs the whole suite on node's built-in test runner — no test dependencies. It
 covers the units, the router guard (against a fake router), the hook runner, and
 end-to-end runs of `src/index.js` as a real subprocess with the network stubbed
-out, asserting on the exact requests that would have hit Cloudflare.
+out, asserting on the exact requests that would have hit Cloudflare. It needs no
+credentials, no network and no router, so it passes on a fresh clone.
+
+#### Testing against a real router (opt-in)
+
+If you use the guard, `npm run test:router` checks the bits mocks cannot: that
+your router still authenticates, that the nvram keys the driver depends on still
+carry values, and — if both are configured — that the ssh and web transports
+report identical values. It deliberately does not assert a *verdict*, since the
+right answer depends on what your WAN is doing at the time.
+
+```
+DDNS_TEST_ROUTER_URL=https://192.168.1.1:8443 \
+DDNS_TEST_ROUTER_USER=admin \
+DDNS_TEST_ROUTER_SSH_HOST=192.168.1.1 \
+npm run test:router
+```
+
+`ROUTER_PASSWORD` comes from `.env`. These tests are read-only — the driver has
+no write path to the router at all.
+
+They run only when `DDNS_TEST_ROUTER=1` (which the npm script sets). Credentials
+being present is deliberately *not* enough: anyone running this client already
+has `ROUTER_PASSWORD` in their environment, and `npm test` must never start
+talking to their router because of that. Under a plain `npm test` these skip
+with a visible reason rather than passing quietly.
 
 ### Cron setup
 

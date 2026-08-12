@@ -7,8 +7,8 @@ Guidance for AI agents working in this repository.
 A small Node.js (ES modules) CLI that checks the current public IP and updates
 Cloudflare DNS records for the configured domains. It supports multiple zones
 and multiple API keys, optional email notifications, file logging, and an
-opt-in router guard that pauses updates while the connection is on a WAN
-failover path / behind CGNAT.
+opt-in reachability guard that pauses updates when the detected public IP is
+one inbound traffic cannot arrive on (CGNAT, WAN failover, upstream NAT).
 
 The project is intentionally **agnostic apart from two hard couplings: Node and
 Cloudflare.** Keep router-, host-, and deployment-specific details out of the
@@ -79,12 +79,20 @@ code frequently passes for the wrong reason.
 - The client only writes a record when the value actually changed (it checks
   both the live DNS answer and the current Cloudflare record first).
 
-## Router drivers (opt-in WAN guard)
+## Router drivers (opt-in reachability guard)
 
 When a `router` block is present in config, the client asks a driver whether the
-detected public IP is safe to publish, and **skips the update** when the router
-is on a failover/CGNAT path (the public IP would be a shared carrier address
-that can't route back home). With no `router` block, the whole feature is inert.
+detected public IP is safe to publish, and **skips the update** when it is not.
+With no `router` block, the whole feature is inert.
+
+Frame it as *reachability*, not CGNAT: the question is "can inbound traffic
+arrive at this address", and CGNAT is the most common cause of "no", not the
+definition. The verdict field is `publishable` for that reason. A plain WAN
+failover pauses too, even when the failover uplink has a routable address —
+signal 1 is checked before any address is examined. Note also that the guard
+assumes DDNS is being used for *inbound* reachability; the `runWhenPaused` hook
+option exists for users whose interest is their *egress* address, which is
+still meaningful (and changing) while updates are paused.
 
 A driver extends `RouterDriver` and implements:
 

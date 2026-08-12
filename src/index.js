@@ -84,6 +84,12 @@ if (routerDriver && ipAddress) {
   const notifyTransition = async (publishable, reason) => {
     const prev = readGuardState(stateFile);
     const changed = prev?.publishable !== publishable;
+    // No stored verdict means this run establishes the baseline, not that
+    // anything transitioned — the same way a missing ipStateFile is treated
+    // above. Mailing "updates resumed" here describes a pause that never
+    // happened, and it recurs on every fresh host or lost state file.
+    // A baseline that is *paused* still mails: that one is worth knowing about.
+    const isHealthyBaseline = prev === null && publishable;
     // A dry run must not move the guard's state or mail anyone: doing so both
     // lies about a transition that never happened and consumes the real one, so
     // the next genuine run stays silent.
@@ -92,6 +98,10 @@ if (routerDriver && ipAddress) {
       return;
     }
     writeGuardState(stateFile, { publishable, reason, ipAddress, timestamp: new Date().toISOString() });
+    if (isHealthyBaseline) {
+      logger('Router guard baseline recorded (publishable); no transition to report.');
+      return;
+    }
     if (!stateFile || !changed || !mailer.isConfigured()) return;
     const toAddress = Config.get('notificationMailAddress');
     if (!toAddress) return;

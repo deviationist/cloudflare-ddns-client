@@ -150,11 +150,62 @@ so, **skips the update and leaves your records on the last known-good IP**.
 
 The feature is **opt-in and driver-based**: add a `router` block to
 `config.json` to enable it; omit it and the client behaves exactly as before.
-Drivers live in `src/routers/`. The bundled driver is `asuswrt-merlin`
-(Asuswrt / Asuswrt-Merlin routers, read over the router's web UI). Other routers
-can be supported by adding a driver that implements the same `evaluate()`
-contract (see `src/routers/RouterDriver.js`) and registering it in
-`src/routers/index.js`.
+Drivers live in `src/routers/`. Two ship with the client:
+
+| `driver` | Use when |
+|---|---|
+| `command` | **Any router.** You supply a command; its stdout decides. No JavaScript required. |
+| `asuswrt-merlin` | Asuswrt / Asuswrt-Merlin routers, read over SSH or the web UI. |
+
+A third option is to write your own: implement the `evaluate()` contract (see
+`src/routers/RouterDriver.js`) and register it in `src/routers/index.js`.
+
+### The `command` driver (works with any router)
+
+Point it at anything that can tell you about your WAN — a vendor CLI, an SSH
+call into the router, `curl` plus `grep` of a modem status page, an SNMP query:
+
+```json
+"router": {
+  "driver": "command",
+  "stateFile": "/var/lib/cloudflare-ddns/router-guard.json",
+  "options": {
+    "command": "/usr/local/bin/wan-state",
+    "args": [],
+    "shell": false,
+    "timeoutMs": 10000
+  }
+}
+```
+
+Two output shapes are accepted on stdout:
+
+1. **A bare IPv4 address** — your WAN address as the router sees it. The client
+   classifies it, so a private or CGNAT address means "don't publish". This
+   covers most routers and is usually a one-liner:
+
+   ```json
+   { "command": "ssh router 'nvram get wan0_ipaddr'", "shell": true }
+   ```
+
+2. **JSON** — `{"publishable": true|false, "reason": "...", "detail": {...}}`
+   for states an address alone can't express, such as being on a failover
+   uplink that happens to have a routable address.
+
+The command receives the detected public IP as `DDNS_DETECTED_IP`, so it can
+compare that with what the router believes without looking it up again.
+
+**The exit status is not the verdict.** A non-zero exit, a timeout, or output
+that is neither an IP nor JSON all mean *"could not determine"*, which fails
+open. That is deliberate: if a broken script could signal "paused", a typo in
+your command would silently freeze DNS updates forever. Say "don't publish"
+explicitly, in the output, or not at all.
+
+Set `shell: true` to run the command through `/bin/sh -c` when you need a pipe
+or a redirect. Your config is trusted input, but note the command runs with the
+same privileges as the client.
+
+### The `asuswrt-merlin` driver
 
 ```json
 "router": {

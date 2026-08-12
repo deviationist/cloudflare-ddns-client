@@ -12,6 +12,7 @@ import Mailer from '../src/Mailer.js';
 import ErrorHandler from '../src/ErrorHandler.js';
 import { serviceName } from '../src/Constants.js';
 import AsuswrtMerlin from '../src/routers/AsuswrtMerlin.js';
+import CommandDriver from '../src/routers/CommandDriver.js';
 import { startFakeRouter } from './helpers/run.js';
 
 const dirs = [];
@@ -633,5 +634,106 @@ describe('AsuswrtMerlin upstream-NAT signal', () => {
     });
 
     assert.equal(verdict.publishable, true);
+  });
+});
+
+describe('CommandDriver', () => {
+  const driver = (options, stdout) => {
+    const d = new CommandDriver(options);
+    if (stdout) d.run = typeof stdout === 'function' ? stdout : async () => stdout;
+    return d;
+  };
+
+  test('treats a bare public IPv4 as publishable', async () => {
+    const verdict = await driver({ command: 'wan-ip' }, '203.0.113.42\n').evaluate();
+
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.publishable, true);
+  });
+
+  test('treats a CGNAT address as not publishable', async () => {
+    const verdict = await driver({ command: 'wan-ip' }, '100.64.12.9').evaluate();
+
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.publishable, false);
+    assert.match(verdict.reason, /private\/CGNAT range/);
+  });
+
+  test('treats an RFC1918 address as not publishable', async () => {
+    const verdict = await driver({ command: 'wan-ip' }, '10.125.124.117').evaluate();
+
+    assert.equal(verdict.publishable, false);
+  });
+
+  test('accepts a JSON verdict for states an address cannot express', async () => {
+    const verdict = await driver({ command: 'wan-state' },
+      '{"publishable": false, "reason": "on 4G failover", "detail": {"uplink": "lte"}}').evaluate();
+
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.publishable, false);
+    assert.equal(verdict.reason, 'on 4G failover');
+    assert.deepEqual(verdict.detail, { uplink: 'lte' });
+  });
+
+  // The exit status must not be the verdict: a broken script has to be
+  // distinguishable from a real pause, or it silently freezes DNS updates.
+  test('a failing command means could-not-determine, not paused', async () => {
+    const verdict = await driver({ command: 'wan-ip' }, async () => { throw new Error('exit 1'); }).evaluate();
+
+    assert.equal(verdict.ok, false);
+    assert.equal(verdict.publishable, false);
+    assert.match(verdict.reason, /command failed/);
+  });
+
+  test('unrecognised output fails open rather than guessing', async () => {
+    const verdict = await driver({ command: 'wan-ip' }, '<html>502 Bad Gateway</html>').evaluate();
+
+    assert.equal(verdict.ok, false);
+    assert.doesNotMatch(verdict.reason, /<html>/);
+  });
+
+  test('empty output fails open', async () => {
+    assert.equal((await driver({ command: 'wan-ip' }, '   \n').evaluate()).ok, false);
+  });
+
+  test('malformed JSON fails open', async () => {
+    assert.equal((await driver({ command: 'x' }, '{"publishable": tru').evaluate()).ok, false);
+  });
+
+  test('JSON without a boolean publishable fails open', async () => {
+    const verdict = await driver({ command: 'x' }, '{"reason": "dunno"}').evaluate();
+
+    assert.equal(verdict.ok, false);
+    assert.match(verdict.reason, /boolean "publishable"/);
+  });
+
+  test('rejects an IPv6 answer, since the records written are A records', async () => {
+    assert.equal((await driver({ command: 'x' }, '2606:4700:4700::1111').evaluate()).ok, false);
+  });
+
+  test('says what is missing when no command is configured', async () => {
+    const verdict = await new CommandDriver({}).evaluate();
+
+    assert.equal(verdict.ok, false);
+    assert.match(verdict.reason, /needs router\.options\.command/);
+  });
+
+  test('really runs a command, passing the detected IP in the environment', async () => {
+    const d = new CommandDriver({
+      command: 'printf "%s" "$DDNS_DETECTED_IP"',
+      shell: true
+    });
+
+    const verdict = await d.evaluate('203.0.113.42');
+
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.publishable, true);
+    assert.equal(verdict.detail.ipaddr, '203.0.113.42');
+  });
+
+  test('a real non-zero exit is reported as could-not-determine', async () => {
+    const d = new CommandDriver({ command: 'exit 3', shell: true });
+
+    assert.equal((await d.evaluate()).ok, false);
   });
 });

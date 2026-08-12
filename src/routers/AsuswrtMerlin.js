@@ -3,6 +3,7 @@ import http from 'http';
 import { execFile } from 'child_process';
 import { URL } from 'url';
 import RouterDriver from './RouterDriver.js';
+import { isNonPublicV4 } from './addresses.js';
 
 // Asuswrt(-Merlin) keeps its WAN state in nvram. This driver reads a handful of
 // those keys purely to decide whether the active WAN is a real, publishable
@@ -20,19 +21,6 @@ import RouterDriver from './RouterDriver.js';
 // password rotation or a revoked SSH key degrades instead of blinding the guard.
 const USER_AGENT = 'asusrouter-Android-DUTUtil-1.0.0.201';
 
-// Ranges that must never be published as a "public" IP. 100.64.0.0/10 is
-// RFC 6598 carrier-grade NAT — the tell-tale sign of a CGNAT'd uplink. Note the
-// RFC1918 ranges matter just as much in practice: carriers hand out 10.x on
-// mobile uplinks at least as often as they use the "official" CGNAT range.
-const NON_PUBLIC_V4 = [
-  ['10.0.0.0', 8],
-  ['172.16.0.0', 12],
-  ['192.168.0.0', 16],
-  ['100.64.0.0', 10], // RFC 6598 — carrier-grade NAT
-  ['169.254.0.0', 16], // link-local
-  ['127.0.0.0', 8],
-];
-
 // Read in one go so the ssh transport needs a single round trip, and so the
 // active-WAN index can be decided from the values rather than by re-querying.
 const NVRAM_KEYS = [
@@ -48,24 +36,6 @@ const NVRAM_KEYS = [
 ];
 
 const SAFE_KEY = /^[a-z0-9_]+$/;
-
-function ipToInt(ip) {
-  const p = String(ip).split('.');
-  if (p.length !== 4 || p.some((o) => o === '' || Number.isNaN(+o) || +o < 0 || +o > 255)) return null;
-  return (((+p[0] << 24) >>> 0) + (+p[1] << 16) + (+p[2] << 8) + +p[3]) >>> 0;
-}
-
-function inCidr(ip, base, bits) {
-  const a = ipToInt(ip);
-  const b = ipToInt(base);
-  if (a === null || b === null) return false;
-  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
-  return (a & mask) === (b & mask);
-}
-
-function isNonPublicV4(ip) {
-  return NON_PUBLIC_V4.some(([base, bits]) => inCidr(ip, base, bits));
-}
 
 function httpRequest(urlStr, { method = 'GET', headers = {}, body = null, rejectUnauthorized = true, timeout = 10000 } = {}) {
   return new Promise((resolve, reject) => {

@@ -1,9 +1,11 @@
 import AsuswrtMerlin from './AsuswrtMerlin.js';
+import CommandDriver from './CommandDriver.js';
 
 // Registry of available router drivers. Add new routers here, keyed by the
 // value users put in `router.driver` in config.json.
 const REGISTRY = {
   [AsuswrtMerlin.driverName]: AsuswrtMerlin,
+  [CommandDriver.driverName]: CommandDriver,
 };
 
 export const availableDrivers = Object.keys(REGISTRY);

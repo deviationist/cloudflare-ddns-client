@@ -1,6 +1,6 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, readFileSync, existsSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, chmodSync } from 'fs';
 import {
   runClient,
   createWorkspace,
@@ -234,5 +234,52 @@ describe('router guard baseline', () => {
 
     assert.equal(guardMails(result).length, 1);
     assert.match(guardMails(result)[0].subject, /DNS updates resumed/);
+  });
+});
+
+describe('command driver, end to end', () => {
+  // Registry wiring is exactly what unit tests miss: a driver can be perfect
+  // and still be unreachable because config never resolves to it.
+  const commandWorkspace = (output, { exitCode = 0 } = {}) => {
+    const paths = createWorkspace({ scenario: changeScenario(), config: {} });
+    const script = `${paths.dir}/wan-state.sh`;
+    writeFileSync(script, `#!/bin/sh\nprintf '%s' '${output}'\nexit ${exitCode}\n`);
+    chmodSync(script, 0o755);
+    writeFileSync(paths.config, JSON.stringify({
+      serviceId: 'test-service',
+      router: { driver: 'command', options: { command: script } },
+      items: [{ apiKey: 'k', zones: [{ zoneId: 'zone-1', dnsRecords: ['domain.com'] }] }]
+    }, null, 2));
+    return paths;
+  };
+
+  test('a CGNAT address from the command pauses DNS updates', () => {
+    const result = runClient(commandWorkspace('100.64.12.9'), ['--verbose']);
+
+    assert.equal(result.updateRequests.length, 0);
+    assert.match(result.stdout, /private\/CGNAT range/);
+  });
+
+  test('a public address from the command lets the update through', () => {
+    const result = runClient(commandWorkspace('203.0.113.42'), ['--verbose']);
+
+    assert.equal(result.updateRequests.length, 1);
+  });
+
+  test('a JSON pause verdict is honoured', () => {
+    const result = runClient(commandWorkspace('{"publishable":false,"reason":"on failover"}'), ['--verbose']);
+
+    assert.equal(result.updateRequests.length, 0);
+    assert.match(result.stdout, /on failover/);
+  });
+
+  test('a broken command fails open rather than freezing DNS', () => {
+    const result = runClient(commandWorkspace('', { exitCode: 3 }), ['--verbose']);
+
+    assert.equal(result.updateRequests.length, 1);
+    // Guard warnings go to stderr: Logger passes the level straight to
+    // console[level], and console.warn is stderr.
+    assert.match(result.stderr, /fail-open/);
+    assert.match(result.stderr, /command failed/);
   });
 });

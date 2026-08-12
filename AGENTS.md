@@ -33,7 +33,9 @@ src/
   hookTest.js       # `npm run hooktest`
   routers/          # opt-in, driver-based WAN guard (see below)
     RouterDriver.js   # base contract
-    AsuswrtMerlin.js  # reference driver
+    addresses.js      # shared: is an IPv4 publicly routable? (used by every driver)
+    AsuswrtMerlin.js  # Asuswrt driver, ssh + web transports
+    CommandDriver.js  # router-agnostic: a user command's stdout is the verdict
     index.js          # registry + createRouterDriver() factory
     GuardState.js     # transition state for de-duped notifications
 test/               # node:test suite; helpers/ stubs the network + a fake router
@@ -118,9 +120,17 @@ It decides `publishable` from: active WAN unit (failover), private/CGNAT WAN IP
 mobile uplinks as readily as the official CGNAT range), or a mismatch between
 the WAN IP and the router's own external-IP probe.
 
-Note the decision logic (`NON_PUBLIC_V4`, the three signals) currently lives
-inside `AsuswrtMerlin.js`. A second driver should hoist it to a shared module
-rather than copy it.
+The `command` driver is the router-agnostic escape hatch: the user supplies a
+command, and its stdout is the verdict — either a bare IPv4 (classified via
+`addresses.js`) or `{"publishable": bool, "reason", "detail"}` JSON. Its exit
+status is deliberately **not** the verdict; a non-zero exit, timeout, or
+unparseable output all mean "could not determine" and fail open, so a typo in a
+user's command cannot silently freeze DNS updates.
+
+Address classification lives in `addresses.js`, not in any driver — "is this
+reachable from the internet" is the question the guard exists to answer, and it
+is not router-specific. New drivers must import it rather than restating the
+ranges.
 
 ## Roadmap
 

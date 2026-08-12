@@ -23,12 +23,18 @@
     "/path/to/simple-script.sh",
     {
       "name": "brevo-ip-allowlist",
-      "on": ["publicIpChanged", "dnsRecordUpdated"],
+      "on": [
+        "publicIpChanged",
+        "dnsRecordUpdated"
+      ],
       "once": true,
       "stopOnError": false,
       "runWhenPaused": true,
       "command": "/path/to/authorize-ip.sh",
-      "args": ["--provider", "brevo"],
+      "args": [
+        "--provider",
+        "brevo"
+      ],
       "cwd": "/path/to",
       "env": {
         "BREVO_API_KEY": "your-brevo-api-key"
@@ -39,7 +45,9 @@
     },
     {
       "name": "alert-on-failure",
-      "on": ["error"],
+      "on": [
+        "error"
+      ],
       "command": "/path/to/alert.sh"
     }
   ],

@@ -45,8 +45,13 @@
   ],
   "router": {
     "driver": "asuswrt-merlin",
-    "stateFile": "/var/log/cloudflare-ddns/router-guard.json",
+    "stateFile": "/var/lib/cloudflare-ddns/router-guard.json",
     "options": {
+      "transport": "auto",
+      "ssh": {
+        "host": "192.168.1.1",
+        "user": "admin"
+      },
       "url": "https://192.168.1.1:8443",
       "username": "admin",
       "passwordEnv": "ROUTER_PASSWORD",

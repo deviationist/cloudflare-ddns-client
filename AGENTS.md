@@ -27,13 +27,18 @@ src/
   ErrorHandler.js   # collects errors and emails them once at the end
   Logger.js         # console (when --verbose) + optional logFile / ipHistoryFile
   Constants.js      # serviceName etc.
+  Hooks.js          # runs user scripts on publicIpChanged / dnsRecordUpdated / always / error
+  IpState.js        # last-known public IP, for change detection independent of Cloudflare
   mailTest.js       # `npm run mailtest`
+  hookTest.js       # `npm run hooktest`
   routers/          # opt-in, driver-based WAN guard (see below)
     RouterDriver.js   # base contract
     AsuswrtMerlin.js  # reference driver
     index.js          # registry + createRouterDriver() factory
     GuardState.js     # transition state for de-duped notifications
+test/               # node:test suite; helpers/ stubs the network + a fake router
 config-example.json # copy to config.json and fill in (config.json is gitignored)
+.env.example        # copy to .env for router credentials (gitignored)
 ```
 
 ## Running
@@ -41,17 +46,32 @@ config-example.json # copy to config.json and fill in (config.json is gitignored
 - `npm run start` — run once. `npm run dev` — watch mode (nodemon).
 - Flags: `--dry-run` (no writes), `--verbose` (console output), `--forceUpdate`
   (skip the "already correct?" short-circuit), `--configPath <path>`.
-- `npm run mailtest` — send a test email using the configured mailer.
+- `npm run mailtest` / `npm run hooktest` — exercise the mailer / hooks alone.
+
+## Testing
+
+`npm test` runs everything on node's built-in runner (no test deps). **Run it
+before and after any change.** The suite covers units, the router guard against
+a fake router, the hook runner, and end-to-end runs of `src/index.js` as a real
+subprocess with `fetch` and nodemailer stubbed (`test/helpers/stub.js`),
+asserting on the exact requests that would have reached Cloudflare.
+
+When fixing a bug, **check the new test actually fails against the unfixed
+code** — revert the fix, watch it go red, restore. A test written from the fixed
+code frequently passes for the wrong reason.
 
 ## Conventions
 
-- **ES modules**, Node 18+ (developed on Node 24). Prefer built-in modules over
-  new dependencies; current runtime deps are just `nodemailer` and `yargs`.
+- **ES modules**, Node 18+ for the library itself (developed on Node 24); the
+  documented `--env-file-if-exists` invocation needs Node 20.18+ / 22.9+. Prefer
+  built-in modules over new dependencies; current runtime deps are just
+  `nodemailer` and `yargs`.
 - **No secrets in git.** `config.json` is gitignored and holds API keys, SMTP
-  credentials, etc. `config-example.json` must contain only placeholders.
-  Router/router-like passwords are referenced by **environment variable name**
-  (`passwordEnv`), never stored in config. Do not hardcode real IPs, hostnames,
-  usernames, or credentials anywhere in tracked files.
+  credentials, etc. `config-example.json` must contain only placeholders. Router
+  credentials are referenced by **environment variable name** (`passwordEnv` /
+  `usernameEnv`), never stored in config; `.env` is gitignored and loaded via
+  node's native `--env-file-if-exists` (no dotenv dependency). Do not hardcode
+  real IPs, hostnames, usernames, or credentials anywhere in tracked files.
 - Network failures should degrade gracefully (functions return `false`/`null`
   rather than throwing) so a single bad run never corrupts a DNS record.
 - The client only writes a record when the value actually changed (it checks
@@ -84,11 +104,23 @@ To add a driver: implement the class in `src/routers/`, then register it in
 `src/routers/index.js` under its `driver` key. Keep all router-specific HTTP /
 auth / parsing inside the driver; the core must stay router-agnostic.
 
-The bundled `asuswrt-merlin` driver authenticates to the router web UI
-(`/login.cgi` → token cookie) and reads nvram via `/appGet.cgi?hook=nvram_get`,
-deciding `publishable` from: active WAN unit (failover), private/CGNAT WAN IP
-(incl. `100.64.0.0/10`), or a mismatch between the WAN IP and the router's own
-external-IP probe.
+The bundled `asuswrt-merlin` driver reads the same nvram keys over either of two
+transports, selected by `options.transport` (`auto` | `ssh` | `web`; `auto`
+prefers ssh and falls back):
+
+- **ssh** — `nvram get` over SSH, all keys in one round trip, `BatchMode=yes`.
+  No stored password when key auth is used. Keys are validated against
+  `/^[a-z0-9_]+$/` before interpolation into the remote command.
+- **web** — `/login.cgi` → token cookie, then `/appGet.cgi?hook=nvram_get`.
+
+It decides `publishable` from: active WAN unit (failover), private/CGNAT WAN IP
+(incl. `100.64.0.0/10` **and** the RFC1918 ranges — carriers hand out `10.x` on
+mobile uplinks as readily as the official CGNAT range), or a mismatch between
+the WAN IP and the router's own external-IP probe.
+
+Note the decision logic (`NON_PUBLIC_V4`, the three signals) currently lives
+inside `AsuswrtMerlin.js`. A second driver should hoist it to a shared module
+rather than copy it.
 
 ## Roadmap
 

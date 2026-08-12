@@ -159,8 +159,10 @@ contract (see `src/routers/RouterDriver.js`) and registering it in
 ```json
 "router": {
   "driver": "asuswrt-merlin",
-  "stateFile": "/var/log/cloudflare-ddns/router-guard.json",
+  "stateFile": "/var/lib/cloudflare-ddns/router-guard.json",
   "options": {
+    "transport": "auto",
+    "ssh": { "host": "192.168.1.1", "user": "admin" },
     "url": "https://192.168.1.1:8443",
     "username": "admin",
     "passwordEnv": "ROUTER_PASSWORD",
@@ -168,6 +170,35 @@ contract (see `src/routers/RouterDriver.js`) and registering it in
   }
 }
 ```
+
+#### Transports
+
+The `asuswrt-merlin` driver can read the router's nvram two ways. Configure
+either or both; `transport` picks between them:
+
+| `transport` | Behaviour |
+|---|---|
+| `"auto"` (default) | Try `ssh` first, fall back to `web`. A rotated password or revoked key degrades instead of blinding the guard. |
+| `"ssh"` | SSH only. |
+| `"web"` | Web UI only. |
+
+- **`ssh`** — runs `nvram get` over SSH, reading every key in one round trip.
+  Needs no password at all when key auth is set up, which also means no
+  credential on disk. Options: `host` (required), `user`, `port`,
+  `identityFile`, `strictHostKeyChecking`, `sshBinary`. It always runs with
+  `BatchMode=yes`, so an unknown host key fails fast rather than hanging a cron
+  run on a prompt — add the router to `known_hosts` first.
+- **`web`** — authenticates at `/login.cgi` and reads keys via `/appGet.cgi`.
+  Needs `url`, `username` and a password. Use `verifySsl: false` for the
+  router's self-signed certificate.
+
+Prefer `ssh` where you can. Beyond avoiding a stored password, routers with an
+admin source-allowlist commonly permit a host SSH but not the web UI, and the
+web transport is the one that gets blocked.
+
+Both `username` and `password` can be read from the environment instead of the
+config file, via `usernameEnv` and `passwordEnv`. The username is worth hiding
+too when it isn't the stock `admin`.
 
 - `passwordEnv` — name of the **environment variable** holding the router
   password (the password is never stored in `config.json`). Export it before
@@ -206,6 +237,17 @@ Note the router account needs access to the **web UI** specifically. On Asus
 firmware with *Administration → System → Access Restriction* enabled, a client
 allowed only SSH can still reach the router yet gets a filtered port on the
 web-UI port, and the guard will fail open on every run.
+
+### Tests
+
+```
+npm test
+```
+
+Runs the whole suite on node's built-in test runner — no test dependencies. It
+covers the units, the router guard (against a fake router), the hook runner, and
+end-to-end runs of `src/index.js` as a real subprocess with the network stubbed
+out, asserting on the exact requests that would have hit Cloudflare.
 
 ### Cron setup
 

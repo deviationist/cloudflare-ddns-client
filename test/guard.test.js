@@ -185,3 +185,54 @@ describe('router guard side effects', () => {
     assert.equal(existsSync(`${paths.dir}/router-guard.json`), false);
   });
 });
+
+const guardMails = result => result.mails.filter(mail => /DNS updates (paused|resumed)/.test(mail.subject));
+
+describe('router guard baseline', () => {
+  const mailable = paths => {
+    const config = JSON.parse(readFileSync(paths.config, 'utf-8'));
+    config.mailConfig = mailConfig;
+    config.notificationMailAddress = 'ops@example.com';
+    writeFileSync(paths.config, JSON.stringify(config, null, 2));
+  };
+
+  // "DNS updates resumed" on a first run describes a pause that never happened,
+  // and would recur on every rebuilt host or lost state file.
+  test('a healthy first run records state without mailing about a transition', async () => {
+    const { paths, router } = await guardWorkspace({ nvram: ON_PRIMARY, hooks: () => [] });
+    mailable(paths);
+
+    const result = runClient(paths);
+    await router.close();
+
+    // Filtered, because a successful run also sends the ordinary IP-change
+    // notification — only guard transition mail is under test here.
+    assert.deepEqual(guardMails(result), []);
+    assert.equal(existsSync(`${paths.dir}/router-guard.json`), true);
+  });
+
+  // But a first run that finds updates *paused* is worth an email: the guard is
+  // actively withholding DNS updates and nothing else would say so.
+  test('a paused first run does mail, because that state is actionable', async () => {
+    const { paths, router } = await guardWorkspace({ nvram: ON_FAILOVER, hooks: () => [] });
+    mailable(paths);
+
+    const result = runClient(paths);
+    await router.close();
+
+    assert.equal(guardMails(result).length, 1);
+    assert.match(guardMails(result)[0].subject, /DNS updates paused/);
+  });
+
+  test('a genuine resume after a pause still mails', async () => {
+    const { paths, router } = await guardWorkspace({ nvram: ON_PRIMARY, hooks: () => [] });
+    mailable(paths);
+    writeFileSync(`${paths.dir}/router-guard.json`, JSON.stringify({ publishable: false, reason: 'was on failover' }));
+
+    const result = runClient(paths);
+    await router.close();
+
+    assert.equal(guardMails(result).length, 1);
+    assert.match(guardMails(result)[0].subject, /DNS updates resumed/);
+  });
+});

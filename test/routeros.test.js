@@ -301,13 +301,28 @@ describe('RouterOS rest transport', () => {
       assert.equal(seen.length, 0);
     }));
 
-  test('reads the password from the environment when asked to', () => {
+  test('reads username and password from the environment when asked to', () => {
+    process.env.TEST_ROS_USER = 'guard-from-env';
     process.env.TEST_ROS_PW = 'from-env';
-    const d = new RouterOS({ url: 'https://192.0.2.1', username: 'guard', passwordEnv: 'TEST_ROS_PW' });
+    const d = new RouterOS({ url: 'https://192.0.2.1', usernameEnv: 'TEST_ROS_USER', passwordEnv: 'TEST_ROS_PW' });
 
+    assert.equal(d.username, 'guard-from-env');
     assert.equal(d.password, 'from-env');
     assert.deepEqual(d.transportOrder, ['rest']);
+    delete process.env.TEST_ROS_USER;
     delete process.env.TEST_ROS_PW;
+  });
+
+  test('the ssh transport takes its user from ssh.user, not usernameEnv', async () => {
+    process.env.TEST_ROS_USER = 'rest-only-user';
+    let seen = null;
+    const d = new RouterOS({ transport: 'ssh', ssh: { host: 'r.example', user: 'guard' }, usernameEnv: 'TEST_ROS_USER' });
+    d.runSsh = async args => { seen = args; return sshOutput(PRIMARY_ROUTES, ADDRESSES); };
+
+    await d.evaluate(PUBLIC_IP);
+
+    assert.ok(seen.includes('guard@r.example'));
+    delete process.env.TEST_ROS_USER;
   });
 
   test('is unusable, and says why, when nothing is configured', async () => {

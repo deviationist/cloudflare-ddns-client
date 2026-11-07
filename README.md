@@ -239,7 +239,7 @@ same privileges as the client.
     "transport": "auto",
     "ssh": { "host": "192.168.1.1", "user": "admin" },
     "url": "https://192.168.1.1:8443",
-    "username": "admin",
+    "usernameEnv": "ROUTER_USERNAME",
     "passwordEnv": "ROUTER_PASSWORD",
     "verifySsl": false
   }
@@ -327,7 +327,7 @@ config to work:
     "transport": "auto",
     "ssh": { "host": "192.168.88.1", "user": "ddns-guard" },
     "url": "https://192.168.88.1",
-    "username": "ddns-guard",
+    "usernameEnv": "ROUTER_USERNAME",
     "passwordEnv": "ROUTER_PASSWORD",
     "caFile": "/etc/ssl/routeros-ca.pem"
   }

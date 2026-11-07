@@ -1,9 +1,6 @@
-import https from 'https';
-import http from 'http';
-import { execFile } from 'child_process';
-import { URL } from 'url';
 import RouterDriver from './RouterDriver.js';
 import { isNonPublicV4 } from './addresses.js';
+import { httpRequest, sshArgs, execSsh } from './transport.js';
 
 // Asuswrt(-Merlin) keeps its WAN state in nvram. This driver reads a handful of
 // those keys purely to decide whether the active WAN is a real, publishable
@@ -36,40 +33,6 @@ export const NVRAM_KEYS = [
 ];
 
 const SAFE_KEY = /^[a-z0-9_]+$/;
-
-function httpRequest(urlStr, { method = 'GET', headers = {}, body = null, rejectUnauthorized = true, timeout = 10000 } = {}) {
-  return new Promise((resolve, reject) => {
-    let u;
-    try {
-      u = new URL(urlStr);
-    } catch (e) {
-      reject(e);
-      return;
-    }
-    const mod = u.protocol === 'https:' ? https : http;
-    const opts = {
-      method,
-      hostname: u.hostname,
-      port: u.port || (u.protocol === 'https:' ? 443 : 80),
-      path: `${u.pathname}${u.search}`,
-      headers,
-      timeout,
-    };
-    if (u.protocol === 'https:') opts.rejectUnauthorized = rejectUnauthorized;
-    const req = mod.request(opts, (res) => {
-      let data = '';
-      res.setEncoding('utf8');
-      res.on('data', (c) => {
-        data += c;
-      });
-      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
-    });
-    req.on('error', reject);
-    req.on('timeout', () => req.destroy(new Error('request timed out')));
-    if (body) req.write(body);
-    req.end();
-  });
-}
 
 export default class AsuswrtMerlin extends RouterDriver {
   static driverName = 'asuswrt-merlin';
@@ -148,33 +111,16 @@ export default class AsuswrtMerlin extends RouterDriver {
 
   // Overridable so tests can drive the transport without a real ssh binary.
   runSsh(args, timeoutMs) {
-    const binary = this.ssh.sshBinary || 'ssh';
-    return new Promise((resolve, reject) => {
-      execFile(binary, args, { timeout: timeoutMs, encoding: 'utf8' }, (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error((stderr || '').trim() || error.message));
-          return;
-        }
-        resolve(stdout);
-      });
-    });
+    return execSsh(this.ssh.sshBinary, args, timeoutMs);
   }
 
   async readViaSsh(keys) {
     const unsafe = keys.filter((key) => !SAFE_KEY.test(key));
     if (unsafe.length) throw new Error(`refusing to query unsafe nvram key(s): ${unsafe.join(', ')}`);
 
-    // One invocation for all keys: `key=value` per line. BatchMode makes a
-    // missing key or an unknown host fail immediately rather than prompting and
-    // hanging a cron run forever.
+    // One invocation for all keys: `key=value` per line.
     const remote = `for k in ${keys.join(' ')}; do printf '%s=%s\\n' "$k" "$(nvram get "$k")"; done`;
-    const args = ['-o', 'BatchMode=yes', '-o', `ConnectTimeout=${Math.max(1, Math.round(this.timeout / 1000))}`];
-    if (this.ssh.strictHostKeyChecking) args.push('-o', `StrictHostKeyChecking=${this.ssh.strictHostKeyChecking}`);
-    if (this.ssh.identityFile) args.push('-i', this.ssh.identityFile);
-    if (this.ssh.port) args.push('-p', String(this.ssh.port));
-    args.push(this.ssh.user ? `${this.ssh.user}@${this.ssh.host}` : this.ssh.host, remote);
-
-    const stdout = await this.runSsh(args, this.timeout);
+    const stdout = await this.runSsh(sshArgs(this.ssh, this.timeout, remote), this.timeout);
     const values = {};
     for (const line of String(stdout).split('\n')) {
       const at = line.indexOf('=');

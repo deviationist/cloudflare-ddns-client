@@ -36,6 +36,8 @@ src/
     addresses.js      # shared: is an IPv4 publicly routable? (used by every driver)
     AsuswrtMerlin.js  # Asuswrt driver, ssh + web transports
     CommandDriver.js  # router-agnostic: a user command's stdout is the verdict
+    RouterOS.js       # MikroTik RouterOS 7 driver, ssh (:serialize) + rest transports
+    transport.js      # shared: httpRequest, sshArgs, execSsh (no router knowledge)
     index.js          # registry + createRouterDriver() factory
     GuardState.js     # transition state for de-duped notifications
 test/               # node:test suite; helpers/ stubs the network + a fake router
@@ -134,6 +136,16 @@ command, and its stdout is the verdict — either a bare IPv4 (classified via
 status is deliberately **not** the verdict; a non-zero exit, timeout, or
 unparseable output all mean "could not determine" and fail open, so a typo in a
 user's command cannot silently freeze DNS updates.
+
+The `routeros` driver reads the default routes and the interface addresses,
+as JSON over ssh (`:serialize to=json`, RouterOS 7.13+) or the REST API, and
+normalises both (REST returns every value as a string). Signal 1: the active
+default route's distance exceeds the primary's (best enabled distance, or
+`primaryDistance`), or it matches the `backupRoute` regexes. Signal 2: the
+detected IP is not assigned to any router interface (upstream NAT/CGNAT). It
+must stay free of any one deployment: no interface names, comments or
+addresses in code or tests; a site's specifics go in its options. A bad option
+sets `configError` and fails open through the verdict, never a throw.
 
 Address classification lives in `addresses.js`, not in any driver — "is this
 reachable from the internet" is the question the guard exists to answer, and it

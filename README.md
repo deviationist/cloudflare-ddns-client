@@ -173,12 +173,13 @@ plain WAN failover, and on an upstream NAT that is not carrier-grade at all.
 
 The feature is **opt-in and driver-based**: add a `router` block to
 `config.json` to enable it; omit it and the client behaves exactly as before.
-Drivers live in `src/routers/`. Two ship with the client:
+Drivers live in `src/routers/`. Three ship with the client:
 
 | `driver` | Use when |
 |---|---|
 | `command` | **Any router.** You supply a command; its stdout decides. No JavaScript required. |
 | `asuswrt-merlin` | Asuswrt / Asuswrt-Merlin routers, read over SSH or the web UI. |
+| `routeros` | MikroTik RouterOS 7, read over SSH or the REST API. |
 
 A third option is to write your own: implement the `evaluate()` contract (see
 `src/routers/RouterDriver.js`) and register it in `src/routers/index.js`.
@@ -238,7 +239,7 @@ same privileges as the client.
     "transport": "auto",
     "ssh": { "host": "192.168.1.1", "user": "admin" },
     "url": "https://192.168.1.1:8443",
-    "username": "admin",
+    "usernameEnv": "ROUTER_USERNAME",
     "passwordEnv": "ROUTER_PASSWORD",
     "verifySsl": false
   }
@@ -311,6 +312,86 @@ Note the router account needs access to the **web UI** specifically. On Asus
 firmware with *Administration → System → Access Restriction* enabled, a client
 allowed only SSH can still reach the router yet gets a filtered port on the
 web-UI port, and the guard will fail open on every run.
+
+### The `routeros` driver (MikroTik)
+
+For MikroTik routers on **RouterOS 7**. It reads two tables, the default
+routes and the interface addresses, and needs nothing router-specific in
+config to work:
+
+```json
+"router": {
+  "driver": "routeros",
+  "stateFile": "/var/lib/cloudflare-ddns/router-guard.json",
+  "options": {
+    "transport": "auto",
+    "ssh": { "host": "192.168.88.1", "user": "ddns-guard" },
+    "url": "https://192.168.88.1",
+    "usernameEnv": "ROUTER_USERNAME",
+    "passwordEnv": "ROUTER_PASSWORD",
+    "caFile": "/etc/ssl/routeros-ca.pem"
+  }
+}
+```
+
+How it decides (either one pauses updates):
+
+1. **Failover.** RouterOS fails over by route distance: the backup uplink's
+   default route has a higher distance and becomes active only when every
+   better route is gone, however the primary is health-checked (link down,
+   `check-gateway`, a recursive route, netwatch). So *the active default route
+   has a higher distance than the best enabled one* means failover. Checked
+   first, so a backup uplink with a routable address still pauses.
+2. **The router doesn't hold the public IP.** The detected public IP must be
+   assigned to one of the router's interfaces. If it isn't, something upstream
+   (CGNAT, a carrier NAT, an ISP modem doing NAT) owns it, and inbound traffic
+   would land there, not on you.
+
+If it can't reach or parse the router, or finds no active default route, it
+**fails open** like the other drivers.
+
+#### Transports
+
+Both are read-only and both return JSON. A user in the built-in **`read`**
+group is enough for either; create a dedicated one rather than reusing an
+admin account.
+
+| `transport` | Behaviour |
+|---|---|
+| `"auto"` (default) | Try `ssh`, fall back to `rest`. |
+| `"ssh"` | SSH only. Runs `:serialize to=json` (**RouterOS 7.13+**), both tables in one round trip. Key auth, so no stored password. Options as for `asuswrt-merlin` (`host`, `user`, `port`, `identityFile`, ...); add the router to `known_hosts` first. |
+| `"rest"` | The REST API at `/rest` (RouterOS 7.1+), with HTTP Basic auth. Served by the **`www-ssl`** service, so the binary API services (`api`, `api-ssl`) can stay disabled. Needs `url`, `username`/`usernameEnv` and `password`/`passwordEnv`. |
+
+For a router signing its own certificate, give its CA as `caFile` (a PEM file)
+rather than `verifySsl: false`: the client then verifies the router without
+your host trusting that CA for anything else.
+
+Setting up the read-only user, with key auth for ssh:
+
+```
+/user add name=ddns-guard group=read password=<long random>
+/user ssh-keys add user=ddns-guard key="ssh-ed25519 AAAA... ddns@host"
+```
+
+#### Telling it about your setup
+
+The defaults suit the usual RouterOS failover. Each option covers a setup they
+can't see:
+
+| Option | Default | Use when |
+|---|---|---|
+| `routingTable` | `"main"` | Your default routes live in another table. |
+| `failover` | `"distance"` | `"off"` leaves only the address check, e.g. for a load-balancing setup where equal-distance routes are all primaries. |
+| `primaryDistance` | best enabled distance | Your failover **disables** the primary route (a netwatch script) instead of letting it go inactive. A disabled route is ignored, which would make the backup look like the best one left; pin the primary's distance here. |
+| `backupRoute` | none | `{ "gateway": "<regex>", "comment": "<regex>" }`. An active route matching either is a backup, whatever its distance, e.g. `{ "gateway": "^lte" }`. |
+| `checkAddress` | `true` | `false` for a router behind 1:1 NAT that never holds its public IP, where the address check would pause forever. |
+
+A bad value (an unknown `failover` mode, an invalid regex) is reported in the
+log and fails open; it never crashes the run.
+
+Not modelled: VRFs and policy routing that keep the internet default route out
+of a single table (fails open), and load balancing where the echo service may
+be reached over either uplink.
 
 ### Tests
 

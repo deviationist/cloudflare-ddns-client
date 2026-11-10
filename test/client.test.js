@@ -29,6 +29,21 @@ describe('update decision', () => {
     });
   });
 
+  test('keeps a proxied record proxied when updating it', () => {
+    const paths = createWorkspace({
+      config: singleRecordConfig(),
+      scenario: changeScenario({
+        cfRecords: { 'zone-1|domain.com': { id: 'rec-1', content: '198.51.100.7', proxied: true } }
+      })
+    });
+    const result = runClient(paths);
+
+    assert.equal(result.code, 0);
+    assert.equal(result.updateRequests.length, 1);
+    assert.equal(result.updateRequests[0].body.content, '203.0.113.42');
+    assert.equal(result.updateRequests[0].body.proxied, true);
+  });
+
   test('skips the update when DNS already resolves to the current IP', () => {
     const paths = createWorkspace({
       config: singleRecordConfig(),

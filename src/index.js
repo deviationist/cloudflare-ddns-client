@@ -204,7 +204,10 @@ await Promise.all(items.flatMap(item =>
           name: dnsRecord,
           content: ipAddress,
           ttl: 1,
-          proxied: false
+          // A PUT replaces the whole record, so carry over the proxy setting:
+          // hardcoding false would turn a proxied record DNS-only (exposing the
+          // origin IP) on the next IP change.
+          proxied: dnsRecordFromCf.proxied ?? false
         }, logger);
       }
 

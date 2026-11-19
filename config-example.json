@@ -68,7 +68,7 @@
   },
   "items": [
     {
-      "apiKey": "your-api-key",
+      "apiKeyEnv": "CLOUDFLARE_API_TOKEN",
       "zones": [
         {
           "zoneId": "your-zone-id",
@@ -89,7 +89,7 @@
     {
       "zones": [
         {
-          "apiKey": "your-api-key-for-zone",
+          "apiKeyEnv": "CLOUDFLARE_API_TOKEN_OTHER",
           "zoneId": "your-zone-id",
           "dnsRecords": [
             "domain.com",

@@ -163,9 +163,50 @@ describe('multiple records and zones', () => {
     });
     const result = runClient(paths, ['--verbose']);
 
-    assert.match(result.stderr, /Missing API key!/);
+    assert.match(result.stderr, /Missing API key for "domain\.com": environment variable "CLOUDFLARE_API_TOKEN" is not set/);
     assert.equal(result.updateRequests.length, 1);
     assert.equal(result.updateRequests[0].body.name, 'foo.com');
+  });
+});
+
+describe('API key from the environment', () => {
+  const scenario = changeScenario();
+  const withItem = item => singleRecordConfig({
+    items: [{ zones: [{ zoneId: 'zone-1', dnsRecords: ['domain.com'] }], ...item }]
+  });
+
+  test('apiKeyEnv reads the token from the named variable', () => {
+    const paths = createWorkspace({ config: withItem({ apiKeyEnv: 'CF_TOKEN_A' }), scenario });
+    const result = runClient(paths, [], { env: { CF_TOKEN_A: 'env-key' } });
+
+    assert.equal(result.updateRequests.length, 1);
+    assert.equal(result.updateRequests[0].authorization, 'Bearer env-key');
+    const cloudflareCalls = result.requests.filter(request => request.url.includes('api.cloudflare.com'));
+    assert.equal(cloudflareCalls.length, 2, 'the record lookup and the update');
+    assert.ok(cloudflareCalls.every(request => request.authorization === 'Bearer env-key'));
+  });
+
+  test('CLOUDFLARE_API_TOKEN is used when config names no key at all', () => {
+    const paths = createWorkspace({ config: withItem({}), scenario });
+    const result = runClient(paths, [], { env: { CLOUDFLARE_API_TOKEN: 'default-key' } });
+
+    assert.equal(result.updateRequests.length, 1);
+    assert.equal(result.updateRequests[0].authorization, 'Bearer default-key');
+  });
+
+  test('a key in config.json still wins over CLOUDFLARE_API_TOKEN', () => {
+    const paths = createWorkspace({ config: withItem({ apiKey: 'config-key' }), scenario });
+    const result = runClient(paths, [], { env: { CLOUDFLARE_API_TOKEN: 'default-key' } });
+
+    assert.equal(result.updateRequests[0].authorization, 'Bearer config-key');
+  });
+
+  test('an unset apiKeyEnv variable skips the record and names the variable', () => {
+    const paths = createWorkspace({ config: withItem({ apiKeyEnv: 'CF_TOKEN_MISSING' }), scenario });
+    const result = runClient(paths, ['--verbose'], { env: { CLOUDFLARE_API_TOKEN: 'default-key' } });
+
+    assert.equal(result.updateRequests.length, 0, 'never falls back to the default token');
+    assert.match(result.stderr, /environment variable "CF_TOKEN_MISSING" is not set/);
   });
 });
 

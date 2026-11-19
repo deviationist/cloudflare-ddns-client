@@ -45,15 +45,20 @@ const readLines = file => (existsSync(file)
 
 const readText = file => (existsSync(file) ? readFileSync(file, 'utf-8') : '');
 
-// Runs src/index.js as a real subprocess with the network stubbed out.
-export function runClient(paths, args = []) {
+// Runs src/index.js as a real subprocess with the network stubbed out. The
+// Cloudflare token variable is stripped from the inherited environment so a
+// token exported in the developer's shell can never change what a test sees;
+// tests that need one pass it through `env`.
+export function runClient(paths, args = [], { env = {} } = {}) {
+  const { CLOUDFLARE_API_TOKEN, ...inherited } = process.env;
   const result = spawnSync(
     process.execPath,
     ['--import', stubPath, join(projectRoot, 'src', 'index.js'), `--configPath=${paths.config}`, ...args],
     {
       encoding: 'utf-8',
       env: {
-        ...process.env,
+        ...inherited,
+        ...env,
         DDNS_TEST_SCENARIO: paths.scenario,
         DDNS_TEST_ARTIFACTS: paths.artifacts
       }

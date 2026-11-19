@@ -177,7 +177,10 @@ await Promise.all(items.flatMap(item =>
 
       const apiKey = Config.resolveApiKey(item, zone);
       if (!apiKey) {
-        logger(`Missing API key!`, 'error');
+        const envName = Config.apiKeyEnvName(item, zone);
+        logger(envName
+          ? `Missing API key for "${dnsRecord}": environment variable "${envName}" is not set (set apiKey or apiKeyEnv in config.json, or ${envName} in .env).`
+          : `Missing API key for "${dnsRecord}"!`, 'error');
         return;
       }
 

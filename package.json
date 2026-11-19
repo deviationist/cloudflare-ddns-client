@@ -5,8 +5,8 @@
   "description": "A Node-based Cloudflare DDNS app.",
   "main": "./src/index.js",
   "scripts": {
-    "start": "node ./src/index.js",
-    "dev": "nodemon --watch src ./src/index.js",
+    "start": "node --env-file-if-exists=./.env ./src/index.js",
+    "dev": "nodemon --watch src --watch .env --exec \"node --env-file-if-exists=./.env ./src/index.js\"",
     "mailtest": "node ./src/mailTest.js",
     "hooktest": "node ./src/hookTest.js",
     "test": "node --test \"test/**/*.test.js\"",

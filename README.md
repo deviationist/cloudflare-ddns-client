@@ -5,11 +5,34 @@ This Node-application will check your current public IP address and update the A
 First make sure you have node installed.
 
 Then:
-1. Copy `config-example.json` to `config.json`
-2. Configure API key, zones and DNS records. Note that API key can be specified on top level item or on a specific zone.
+1. Copy `config-example.json` to `config.json`, and `.env.example` to `.env` (`chmod 600 .env`)
+2. Configure zones and DNS records in `config.json`, and put the Cloudflare API token in `.env` as `CLOUDFLARE_API_TOKEN` (see [Cloudflare API token](#cloudflare-api-token) for per-zone tokens).
 3. Run `npm run start`, or `npm run dev`
 
 Use option `--dry-run` for testing. Use option `--verbose` to get verbose output of the process. You can override the DNS lookup check by using the `--forceUpdate`-argument, like this `npm run start -- --forceUpdate`. You can also run the script directly with node, like this: `node ./src/index.js --forceUpdate`. You might need to change file permissions for this to work (`chmod +x ./src/index.js`).
+
+### Cloudflare API token
+
+The token is best kept in `.env` rather than `config.json`. Each zone looks for
+its key in this order, and the first level that names one wins:
+
+1. the zone's `apiKeyEnv` (name of an environment variable) or `apiKey` (the key itself)
+2. the same two on the zone's item
+3. the `CLOUDFLARE_API_TOKEN` environment variable
+
+So with a single token, leave `apiKey` out of `config.json` entirely and set
+`CLOUDFLARE_API_TOKEN` in `.env`. With one token per zone, give each zone an
+`"apiKeyEnv": "CLOUDFLARE_API_TOKEN_SOMETHING"` and set those variables. When
+both `apiKeyEnv` and `apiKey` are on the same level, `apiKeyEnv` wins.
+
+If `apiKeyEnv` names a variable that is unset or empty, that zone's records are
+skipped with an error naming the variable; the client does **not** fall back to
+an item-level key or `CLOUDFLARE_API_TOKEN`, so a missing variable can never
+send the wrong token to a zone.
+
+`npm run start` and `npm run dev` load `.env` themselves. When running node
+directly (cron, systemd), pass it: `node --env-file-if-exists=./.env ./src/index.js`
+(needs Node 20.18+ / 22.9+).
 
 ### Public IP sources
 The client detects your public IP by asking an external echo service. `ipSources`
@@ -432,7 +455,9 @@ with a visible reason rather than passing quietly.
 ### Cron setup
 
 To run this script automatically you can add it to your crontab. My setup looks like this and runs every 5 minute:
-`*/5 * * * * /usr/bin/env node /path/to/your/code/src/index.js > /dev/null 2>&1`
+`*/5 * * * * cd /path/to/your/code && /usr/bin/env node --env-file-if-exists=./.env ./src/index.js > /dev/null 2>&1`
+
+The `cd` matters: `config.json` and `.env` are both read relative to the working directory.
 
 Use [crontab.guru](https://crontab.guru/) to find a different interval.
 

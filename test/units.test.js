@@ -79,8 +79,41 @@ describe('Config', () => {
     });
 
     test('returns false when neither has one', () => {
-      assert.equal(Config.resolveApiKey({}, {}), false);
-      assert.equal(Config.resolveApiKey(undefined, undefined), false);
+      assert.equal(Config.resolveApiKey({}, {}, {}), false);
+      assert.equal(Config.resolveApiKey(undefined, undefined, {}), false);
+    });
+
+    test('apiKeyEnv reads the named variable, at zone or item level', () => {
+      const env = { ZONE_TOKEN: 'z', ITEM_TOKEN: 'i' };
+      assert.equal(Config.resolveApiKey({ apiKeyEnv: 'ITEM_TOKEN' }, { apiKeyEnv: 'ZONE_TOKEN' }, env), 'z');
+      assert.equal(Config.resolveApiKey({ apiKeyEnv: 'ITEM_TOKEN' }, {}, env), 'i');
+    });
+
+    test('apiKeyEnv beats a literal apiKey on the same level', () => {
+      assert.equal(Config.resolveApiKey({}, { apiKey: 'literal', apiKeyEnv: 'T' }, { T: 'from-env' }), 'from-env');
+    });
+
+    test('a zone apiKeyEnv beats an item apiKey', () => {
+      assert.equal(Config.resolveApiKey({ apiKey: 'item' }, { apiKeyEnv: 'T' }, { T: 'zone-env' }), 'zone-env');
+    });
+
+    test('an empty apiKeyEnv variable does not fall through to a broader key', () => {
+      const env = { CLOUDFLARE_API_TOKEN: 'default' };
+      assert.equal(Config.resolveApiKey({ apiKey: 'item' }, { apiKeyEnv: 'UNSET' }, env), false);
+      assert.equal(Config.resolveApiKey({ apiKeyEnv: 'UNSET' }, {}, env), false);
+    });
+
+    test('CLOUDFLARE_API_TOKEN is the last resort', () => {
+      const env = { CLOUDFLARE_API_TOKEN: 'default' };
+      assert.equal(Config.resolveApiKey({}, {}, env), 'default');
+      assert.equal(Config.resolveApiKey({ apiKey: 'item' }, {}, env), 'item');
+    });
+
+    test('apiKeyEnvName names the variable the key was expected in', () => {
+      assert.equal(Config.apiKeyEnvName({ apiKeyEnv: 'I' }, { apiKeyEnv: 'Z' }), 'Z');
+      assert.equal(Config.apiKeyEnvName({ apiKeyEnv: 'I' }, {}), 'I');
+      assert.equal(Config.apiKeyEnvName({}, {}), 'CLOUDFLARE_API_TOKEN');
+      assert.equal(Config.apiKeyEnvName({ apiKey: 'k' }, {}), null);
     });
   });
 });

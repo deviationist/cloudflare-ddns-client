@@ -70,10 +70,13 @@ code frequently passes for the wrong reason.
   documented `--env-file-if-exists` invocation needs Node 20.18+ / 22.9+. Prefer
   built-in modules over new dependencies; current runtime deps are just
   `nodemailer` and `yargs`.
-- **No secrets in git.** `config.json` is gitignored and holds API keys, SMTP
-  credentials, etc. `config-example.json` must contain only placeholders. Router
-  credentials are referenced by **environment variable name** (`passwordEnv` /
-  `usernameEnv`), never stored in config; `.env` is gitignored and loaded via
+- **No secrets in git.** `config.json` is gitignored and holds SMTP
+  credentials etc. (and, optionally, literal API keys). `config-example.json`
+  must contain only placeholders. Cloudflare tokens and router credentials are
+  referenced by **environment variable name** (`apiKeyEnv`, `passwordEnv` /
+  `usernameEnv`; `CLOUDFLARE_API_TOKEN` as the default) rather than stored in
+  config. The test runner strips `CLOUDFLARE_API_TOKEN` from the inherited
+  environment so a developer's shell can't leak into a test run; `.env` is gitignored and loaded via
   node's native `--env-file-if-exists` (no dotenv dependency). Do not hardcode
   real IPs, hostnames, usernames, or credentials anywhere in tracked files.
 - Network failures should degrade gracefully (functions return `false`/`null`
